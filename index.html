@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>European Energy Transition Dashboard</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>European Energy Transition Dashboard</h1>
+
+    <nav class="main-nav">
+      <button>Overview</button>
+      <button>Generation</button>
+      <button>Power Flows</button>
+      <button>Data</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="filter-bar">
+      <label>
+        Year
+        <select id="yearFilter">
+          <option value="2025">2025</option>
+        </select>
+      </label>
+
+      <label>
+        Country
+        <select id="countryFilter">
+          <option value="all">All countries</option>
+        </select>
+      </label>
+
+      <label>
+        Metric
+        <select id="metricFilter">
+          <option value="ValueInGWh">GWh</option>
+          <option value="ShareIn%">Share %</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="overview">
+      <article class="kpi-card">
+        <h2>Total Generation</h2>
+        <p id="totalGeneration">Loading...</p>
+      </article>
+
+      <article class="kpi-card">
+        <h2>Countries</h2>
+        <p id="countryCount">Loading...</p>
+      </article>
+
+      <article class="kpi-card">
+        <h2>Energy Sources</h2>
+        <p id="sourceCount">Loading...</p>
+      </article>
+    </section>
+
+    <section class="visualization-placeholder">
+      <h2>Visualization Area</h2>
+      <p>Charts, maps, and power flow diagrams will be added here.</p>
+    </section>
+  </main>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

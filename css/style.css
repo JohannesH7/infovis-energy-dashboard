@@ -1,0 +1,86 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.app-header {
+  background: #1f3a5f;
+  color: white;
+  padding: 24px;
+}
+
+.app-header h1 {
+  margin: 0 0 16px 0;
+}
+
+.main-nav {
+  display: flex;
+  gap: 12px;
+}
+
+.main-nav button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+main {
+  padding: 24px;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: white;
+  padding: 16px;
+  border-radius: 10px;
+  margin-bottom: 24px;
+}
+
+.filter-bar label {
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  gap: 4px;
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.kpi-card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+}
+
+.kpi-card h2 {
+  margin-top: 0;
+  font-size: 16px;
+  color: #4b5563;
+}
+
+.kpi-card p {
+  font-size: 28px;
+  font-weight: bold;
+  margin-bottom: 0;
+}
+
+.visualization-placeholder {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px dashed #9ca3af;
+}
