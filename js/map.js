@@ -1,4 +1,4 @@
-let svg;
+/*let svg;
 let pathGenerator;
 let selectedCountryCode = null;
 
@@ -197,4 +197,4 @@ function updateLegend(maxValue, metric) {
     <span>0 ${unit}</span>
     <span>${formatNumber(maxValue)} ${unit}</span>
   `);
-}
+}*/

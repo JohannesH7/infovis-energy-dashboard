@@ -4,41 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <title>European Energy Transition Dashboard</title>
+  <title>EU Energy Dashboard</title>
 
   <link rel="stylesheet" href="css/style.css" />
 
-  <!-- D3.js for maps, scales, SVG and interactions -->
+  <!-- D3.js -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 </head>
 
 <body>
   <header class="top-nav">
-    <div class="brand">
-      <div class="brand-icon">⚡</div>
-      <span>EU Energy</span>
-    </div>
+    <div class="brand">EU Energy</div>
 
     <nav class="nav-links">
-      <button class="nav-button active">Overview</button>
-      <button class="nav-button">Generation</button>
-      <button class="nav-button">Flows</button>
-      <button class="nav-button">Compare Countries</button>
+      <button class="nav-btn active">Overview</button>
+      <button class="nav-btn">Generation</button>
+      <button class="nav-btn">Flows</button>
+      <button class="nav-btn">Compare Countries</button>
     </nav>
   </header>
 
-  <main class="app">
-    <section class="hero">
+  <main class="page">
+    <section class="intro">
       <h1>Electricity Generation and Power Flows in Europe</h1>
       <p>
-        Explore European electricity generation by country, time and energy source.
-        The first prototype focuses on an interactive map representation using ENTSO-E data.
+        Explore electricity generation across European countries by year, month,
+        energy source, absolute values and relative shares.
       </p>
     </section>
 
-    <section class="dashboard-layout">
+    <section class="dashboard">
       <aside class="sidebar">
-        <section class="filter-card">
+        <section class="panel">
           <h2>Filters</h2>
 
           <label>
@@ -49,6 +46,11 @@
           <label>
             Month
             <select id="monthFilter"></select>
+          </label>
+
+          <label>
+            Country
+            <select id="countryFilter"></select>
           </label>
 
           <label>
@@ -64,69 +66,68 @@
             </select>
           </label>
 
-          <button id="resetFilters" class="reset-button">Reset filters</button>
+          <button id="resetFilters" class="reset-btn">Reset filters</button>
         </section>
 
-        <section class="filter-card">
+        <section class="panel">
           <h2>Map Reading</h2>
-          <p class="small-text">
+          <p>
             Darker countries represent higher values for the selected metric.
-            Countries without data are shown in grey.
+            Countries without matching data are shown in grey.
           </p>
         </section>
       </aside>
 
       <section class="content">
         <section class="kpi-grid">
-          <article class="kpi-card">
-            <span class="kpi-label">Total Generation</span>
-            <strong id="totalGeneration">Loading...</strong>
+          <article class="kpi-card renewable">
+            <span>Selected Total</span>
+            <strong id="selectedTotal">Loading...</strong>
           </article>
 
-          <article class="kpi-card">
-            <span class="kpi-label">Countries with Data</span>
-            <strong id="countryCount">Loading...</strong>
+          <article class="kpi-card blue">
+            <span>Countries with Data</span>
+            <strong id="countriesWithData">Loading...</strong>
           </article>
 
-          <article class="kpi-card">
-            <span class="kpi-label">Selected Source</span>
+          <article class="kpi-card grey">
+            <span>Selected Source</span>
             <strong id="selectedSource">Loading...</strong>
           </article>
 
-          <article class="kpi-card">
-            <span class="kpi-label">Selected Metric</span>
+          <article class="kpi-card orange">
+            <span>Selected Metric</span>
             <strong id="selectedMetric">Loading...</strong>
           </article>
         </section>
 
         <section class="map-card">
-          <div class="section-header">
+          <div class="map-header">
             <div>
-              <h2>European Choropleth Map</h2>
-              <p>
-                Electricity generation by selected energy source, month and country.
-              </p>
+              <h2 id="mapTitle">European Choropleth Map</h2>
+              <p id="mapSubtitle">Generation by selected source and month.</p>
             </div>
 
-            <div id="mapLegend" class="legend"></div>
+            <div class="legend">
+              <span>low</span>
+              <div class="legend-gradient"></div>
+              <span>high</span>
+              <small id="legendMax"></small>
+            </div>
           </div>
 
           <div id="map"></div>
         </section>
 
-        <section class="placeholder-grid">
+        <section class="bottom-grid">
           <article class="placeholder-card">
             <h2>Energy Mix Chart</h2>
-            <p>
-              Later: stacked bar chart for selected countries and energy sources.
-            </p>
+            <p>Next step: stacked bar chart for selected countries.</p>
           </article>
 
           <article class="placeholder-card">
             <h2>Power Flow View</h2>
-            <p>
-              Later: top imports, top exports and node diagram for country relations.
-            </p>
+            <p>Next step: top imports, top exports and node diagram.</p>
           </article>
         </section>
       </section>
@@ -135,8 +136,6 @@
 
   <div id="tooltip" class="tooltip"></div>
 
-  <script src="js/filters.js"></script>
-  <script src="js/map.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

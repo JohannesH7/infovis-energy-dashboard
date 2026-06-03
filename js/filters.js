@@ -1,4 +1,4 @@
-function setupFilters(data) {
+/*function setupFilters(data) {
   const years = [...new Set(data.map(row => Number(row.Year)))].sort((a, b) => a - b);
   const months = [...new Set(data.map(row => Number(row.Month)))].sort((a, b) => a - b);
   const energySources = [...new Set(data.map(row => row.EnergySource))].sort();
@@ -75,4 +75,4 @@ function getCurrentFilters() {
     energySource: document.getElementById("energySourceFilter").value,
     metric: document.getElementById("metricFilter").value
   };
-}
+}*/
