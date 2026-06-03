@@ -38,15 +38,30 @@
         <section class="panel">
           <h2>Filters</h2>
 
-          <label>
-            Year
-            <select id="yearFilter"></select>
-          </label>
+          <div class="timeline-filter">
+            <h3>Time Range</h3>
 
-          <label>
-            Month
-            <select id="monthFilter"></select>
-          </label>
+            <div class="timeline-labels">
+              <span id="startDateLabel">Jan 2025</span>
+              <span id="endDateLabel">Dec 2025</span>
+            </div>
+
+            <div class="timeline-wrapper" id="timelineWrapper">
+              <div class="timeline-track"></div>
+              <div class="timeline-selection" id="timelineSelection"></div>
+
+              <input id="startTimeRange" class="timeline-input" type="range" min="0" max="0" value="0">
+              <input id="endTimeRange" class="timeline-input" type="range" min="0" max="0" value="0">
+
+              <div class="timeline-ticks" id="timelineTicks"></div>
+            </div>
+
+            <div class="timeline-actions">
+              <button id="singleMonthBtn" type="button">Single Month</button>
+              <button id="wholeYearBtn" type="button">Whole Year</button>
+              <button id="fullRangeBtn" type="button">Full Range</button>
+            </div>
+          </div>
 
           <label>
             Country
@@ -58,13 +73,14 @@
             <select id="energySourceFilter"></select>
           </label>
 
-          <label>
-            Metric
-            <select id="metricFilter">
-              <option value="ValueInGWh">Value in GWh</option>
-              <option value="ShareIn%">Share in %</option>
-            </select>
-          </label>
+          <div class="metric-toggle">
+            <h3>Metric</h3>
+
+            <div class="segmented-control" id="metricToggle">
+              <button type="button" class="active" data-metric="ValueInGWh">GWh</button>
+              <button type="button" data-metric="ShareIn%">%</button>
+            </div>
+          </div>
 
           <button id="resetFilters" class="reset-btn">Reset filters</button>
         </section>

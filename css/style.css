@@ -13,6 +13,7 @@
   --text: #111827;
   --muted: #6b7280;
   --missing: #d1d5db;
+  --inactive: #e5e7eb;
 }
 
 * {
@@ -25,6 +26,10 @@ body {
   background: var(--background);
   color: var(--text);
 }
+
+/* -------------------------------------------------------
+   TOP NAVIGATION
+------------------------------------------------------- */
 
 .top-nav {
   height: 54px;
@@ -65,6 +70,10 @@ body {
   color: var(--white);
 }
 
+/* -------------------------------------------------------
+   PAGE LAYOUT
+------------------------------------------------------- */
+
 .page {
   padding: 40px 24px;
 }
@@ -100,6 +109,16 @@ body {
   gap: 24px;
 }
 
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* -------------------------------------------------------
+   PANELS / FILTERS
+------------------------------------------------------- */
+
 .panel {
   background: var(--white);
   border: 1px solid var(--border);
@@ -110,6 +129,11 @@ body {
 .panel h2 {
   margin: 0 0 18px 0;
   font-size: 16px;
+}
+
+.panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
 }
 
 .panel label {
@@ -139,7 +163,7 @@ body {
 
 .reset-btn {
   width: 100%;
-  margin-top: 4px;
+  margin-top: 18px;
   padding: 11px;
   border: none;
   border-radius: 7px;
@@ -149,11 +173,175 @@ body {
   font-weight: 600;
 }
 
-.content {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+/* -------------------------------------------------------
+   TIMELINE FILTER
+------------------------------------------------------- */
+
+.timeline-filter {
+  margin-bottom: 24px;
 }
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.timeline-wrapper {
+  position: relative;
+  height: 62px;
+  margin: 6px 0 18px 0;
+}
+
+.timeline-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 22px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--light-blue);
+}
+
+.timeline-selection {
+  position: absolute;
+  top: 22px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--blue);
+  left: 0%;
+  width: 100%;
+  pointer-events: none;
+}
+
+.timeline-input {
+  position: absolute;
+  left: 0;
+  top: 13px;
+  width: 100%;
+  pointer-events: none;
+  appearance: none;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-input::-webkit-slider-thumb {
+  appearance: none;
+  pointer-events: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--navy);
+  border: 3px solid var(--white);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  cursor: grab;
+}
+
+.timeline-input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--navy);
+  border: 3px solid var(--white);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  cursor: grab;
+}
+
+.timeline-input::-webkit-slider-runnable-track {
+  appearance: none;
+  height: 0;
+}
+
+.timeline-input::-moz-range-track {
+  height: 0;
+}
+
+.timeline-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 36px;
+  height: 22px;
+}
+
+.timeline-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.timeline-tick::before {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 7px;
+  background: var(--grey);
+  margin: 0 auto 3px auto;
+  opacity: 0.65;
+}
+
+.timeline-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.timeline-actions button {
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--navy);
+  border-radius: 7px;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timeline-actions button:hover {
+  background: var(--light-blue);
+}
+
+/* -------------------------------------------------------
+   METRIC TOGGLE
+------------------------------------------------------- */
+
+.metric-toggle {
+  margin-top: 8px;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #edf2f7;
+  border-radius: 9px;
+  padding: 4px;
+}
+
+.segmented-control button {
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 9px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.segmented-control button.active {
+  background: var(--navy);
+  color: var(--white);
+}
+
+/* -------------------------------------------------------
+   KPI CARDS
+------------------------------------------------------- */
 
 .kpi-grid {
   display: grid;
@@ -196,6 +384,10 @@ body {
 .kpi-card.orange strong {
   color: var(--orange);
 }
+
+/* -------------------------------------------------------
+   MAP
+------------------------------------------------------- */
 
 .map-card,
 .placeholder-card {
@@ -273,6 +465,10 @@ body {
   font-size: 11px;
 }
 
+/* -------------------------------------------------------
+   TOOLTIP
+------------------------------------------------------- */
+
 .tooltip {
   position: absolute;
   opacity: 0;
@@ -283,9 +479,13 @@ body {
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.45;
-  box-shadow: 0 10px 28px rgba(0,0,0,0.25);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   z-index: 100;
 }
+
+/* -------------------------------------------------------
+   PLACEHOLDER CARDS
+------------------------------------------------------- */
 
 .bottom-grid {
   display: grid;
@@ -307,6 +507,10 @@ body {
   color: var(--muted);
   line-height: 1.5;
 }
+
+/* -------------------------------------------------------
+   RESPONSIVE
+------------------------------------------------------- */
 
 @media (max-width: 950px) {
   .dashboard {
