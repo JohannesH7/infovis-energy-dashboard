@@ -1,49 +1,81 @@
-async function loadData() {
-  try {
-    const response = await fetch("data/entsoe_sample.json");
+let generationData = [];
+let geoData = [];
 
-    if (!response.ok) {
-      throw new Error("Could not load JSON file");
+async function initApp() {
+  try {
+    const [generationResponse, geoResponse] = await Promise.all([
+      fetch("data/entsoe_domestic_generation_2025.json"),
+      fetch("data/europe.geojson")
+    ]);
+
+    if (!generationResponse.ok) {
+      throw new Error("Generation JSON could not be loaded.");
     }
 
-    const data = await response.json();
-    console.log("Loaded data:", data);
+    if (!geoResponse.ok) {
+      throw new Error("Europe GeoJSON could not be loaded.");
+    }
 
-    updateKpis(data);
-    fillCountryFilter(data);
+    generationData = await generationResponse.json();
+    geoData = await geoResponse.json();
+
+    setupFilters(generationData);
+    drawMap(geoData);
+    updateDashboard();
+
+    console.log("Application initialized successfully.");
   } catch (error) {
-    console.error("Error loading data:", error);
+    console.error("Initialization error:", error);
+    showLoadingError(error.message);
   }
 }
 
+function updateDashboard() {
+  updateMap(generationData);
+  updateKpis(generationData);
+}
+
 function updateKpis(data) {
-  const totalGeneration = data.reduce((sum, row) => {
+  const filters = getCurrentFilters();
+
+  const filteredData = data.filter(row =>
+    Number(row.Year) === filters.year &&
+    Number(row.Month) === filters.month &&
+    row.EnergySource === filters.energySource
+  );
+
+  const totalGeneration = filteredData.reduce((sum, row) => {
     return sum + Number(row.ValueInGWh || 0);
   }, 0);
 
-  const countries = new Set(data.map(row => row.Country));
-  const energySources = new Set(data.map(row => row.EnergySource));
+  const countriesWithData = new Set(filteredData.map(row => row.Country));
 
   document.getElementById("totalGeneration").textContent =
-    `${totalGeneration.toFixed(1)} GWh`;
+    `${formatNumber(totalGeneration)} GWh`;
 
   document.getElementById("countryCount").textContent =
-    countries.size;
+    countriesWithData.size;
 
-  document.getElementById("sourceCount").textContent =
-    energySources.size;
+  document.getElementById("selectedSource").textContent =
+    filters.energySource;
+
+  document.getElementById("selectedMetric").textContent =
+    filters.metric === "ValueInGWh" ? "GWh" : "%";
 }
 
-function fillCountryFilter(data) {
-  const countryFilter = document.getElementById("countryFilter");
-  const countries = [...new Set(data.map(row => row.Country))].sort();
-
-  countries.forEach(country => {
-    const option = document.createElement("option");
-    option.value = country;
-    option.textContent = country;
-    countryFilter.appendChild(option);
+function formatNumber(value) {
+  return Number(value).toLocaleString("en-US", {
+    maximumFractionDigits: 1
   });
 }
 
-loadData();
+function showLoadingError(message) {
+  const map = document.getElementById("map");
+  map.innerHTML = `
+    <div style="padding: 24px; color: #d96c50;">
+      <strong>Error:</strong> ${message}
+    </div>
+  `;
+}
+
+initApp();
