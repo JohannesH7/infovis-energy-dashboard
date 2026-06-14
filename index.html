@@ -135,17 +135,55 @@
           <div id="map"></div>
         </section>
 
-        <section class="bottom-grid">
-          <article class="placeholder-card">
-            <h2>Energy Mix Chart</h2>
-            <p>Next step: stacked bar chart for selected countries.</p>
-          </article>
+        <section class="flow-card">
+          <div class="flow-header">
+            <div>
+              <h2>Power Flow View</h2>
+              <p id="flowSubtitle">Select a country to inspect import and export relations.</p>
+            </div>
+          </div>
 
-          <article class="placeholder-card">
-            <h2>Power Flow View</h2>
-            <p>Next step: top imports, top exports and node diagram.</p>
-          </article>
+          <div class="flow-summary-grid">
+            <article class="flow-metric">
+              <span>Total Imports</span>
+              <strong id="totalImports">-</strong>
+            </article>
+
+            <article class="flow-metric">
+              <span>Total Exports</span>
+              <strong id="totalExports">-</strong>
+            </article>
+
+            <article class="flow-metric">
+              <span>Net Balance</span>
+              <strong id="netBalance">-</strong>
+            </article>
+          </div>
+
+          <div class="flow-network-wrapper">
+            <div class="flow-network-header">
+              <h3>European Flow Network</h3>
+              <p id="flowNetworkSubtitle">
+                All cross-border electricity connections for the selected time range.
+              </p>
+            </div>
+
+            <div id="flowNetworkMap"></div>
+          </div>
+
+          <div class="flow-columns">
+            <article class="flow-list-card">
+              <h3>Top 3 Import Partners</h3>
+              <ol id="topImportList" class="flow-list"></ol>
+            </article>
+
+            <article class="flow-list-card">
+              <h3>Top 3 Export Partners</h3>
+              <ol id="topExportList" class="flow-list"></ol>
+            </article>
+          </div>
         </section>
+
       </section>
     </section>
   </main>

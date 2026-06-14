@@ -472,6 +472,245 @@ body {
 }
 
 /* -------------------------------------------------------
+   POWER FLOW CARD
+------------------------------------------------------- */
+
+.flow-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.flow-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.flow-header h2 {
+  margin: 0 0 6px 0;
+  font-size: 19px;
+}
+
+.flow-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.flow-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.flow-metric {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  background: #f8fafc;
+}
+
+.flow-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.flow-metric strong {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.flow-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.flow-list-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  background: var(--white);
+}
+
+.flow-list-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+}
+
+.flow-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.flow-list li {
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.flow-list .partner-value {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.flow-empty {
+  color: var(--muted);
+  font-size: 14px;
+  list-style: none;
+}
+
+/* -------------------------------------------------------
+   FORCE-DIRECTED FLOW NETWORK
+------------------------------------------------------- */
+
+.flow-network-wrapper {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--white);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.flow-network-header {
+  margin-bottom: 12px;
+}
+
+.flow-network-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+}
+
+.flow-network-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#flowNetworkMap {
+  width: 100%;
+  height: 560px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: radial-gradient(circle at center, #ffffff 0%, #f4f7fb 100%);
+}
+
+.network-background-click {
+  fill: transparent;
+  cursor: default;
+}
+
+.network-link {
+  fill: none;
+  stroke: #94a3b8;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+
+.network-link.backbone {
+  stroke: #64748b;
+}
+
+.network-link.dimmed {
+  opacity: 0.025 !important;
+}
+
+.network-link.incoming-highlight {
+  stroke: var(--blue);
+  opacity: 0.95 !important;
+}
+
+.network-link.outgoing-highlight {
+  stroke: var(--orange);
+  opacity: 0.95 !important;
+}
+
+.network-link.bidirectional-highlight {
+  stroke: var(--navy);
+  opacity: 0.95 !important;
+}
+
+.network-node {
+  fill: var(--white);
+  stroke-width: 2.5;
+  cursor: pointer;
+  transition: opacity 0.15s ease, r 0.15s ease, fill 0.15s ease;
+}
+
+.network-node.net-importer {
+  stroke: var(--blue);
+}
+
+.network-node.net-exporter {
+  stroke: var(--orange);
+}
+
+.network-node.net-balanced {
+  stroke: var(--navy);
+}
+
+.network-node.dimmed {
+  opacity: 0.18;
+}
+
+.network-node.hovered {
+  fill: var(--navy);
+  stroke: var(--white);
+  stroke-width: 3.5;
+}
+
+.network-node.neighbor {
+  fill: var(--light-blue);
+  opacity: 1;
+}
+
+.network-label {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--black);
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.32;
+  paint-order: stroke;
+  stroke: var(--white);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.network-label.important {
+  opacity: 1;
+}
+
+.network-label.dimmed {
+  opacity: 0.06 !important;
+}
+
+.network-label.highlighted {
+  opacity: 1 !important;
+  font-size: 12px;
+  fill: var(--navy);
+}
+
+.network-legend text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.network-legend-title {
+  fill: var(--text) !important;
+  font-weight: 700;
+}
+
+/* -------------------------------------------------------
    TOOLTIP
 ------------------------------------------------------- */
 
@@ -487,6 +726,7 @@ body {
   line-height: 1.45;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   z-index: 100;
+  max-width: 360px;
 }
 
 /* -------------------------------------------------------
@@ -532,6 +772,13 @@ body {
   }
 }
 
+@media (max-width: 800px) {
+  .flow-summary-grid,
+  .flow-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 620px) {
   .top-nav {
     height: auto;
@@ -550,5 +797,9 @@ body {
 
   #map {
     height: 440px;
+  }
+
+  #flowNetworkMap {
+    height: 460px;
   }
 }

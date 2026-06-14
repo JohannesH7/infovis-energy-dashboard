@@ -1,15 +1,29 @@
-const DATA_URL = "data/entsoe_domestic_generation_2019_2025.json";
+const GENERATION_URL = "data/entsoe_domestic_generation_2019_2025.json";
+const FLOWS_URL = "data/entsoe_power_flows_2019_2025.json";
 const GEO_URL = "data/europe.geojson";
 
 let generationData = [];
+let flowData = [];
 let geoData = null;
+
 let svg = null;
 let path = null;
+
+let flowSvg = null;
+let lastNetworkData = null;
+let networkAnchorProjection = null;
+let networkAnchorPath = null;
+let selectedNetworkCountry = null;
+
 let selectedMetric = "ShareIn%";
 let timePeriods = [];
+let countryNameLookup = new Map();
 
 const mapWidth = 900;
 const mapHeight = 610;
+
+const flowMapWidth = 900;
+const flowMapHeight = 560;
 
 const monthNames = {
   1: "January",
@@ -58,35 +72,56 @@ const fossilSources = [
   "Fossil Peat"
 ];
 
+const countryCodeAliases = {
+  UK: "GB",
+  EL: "GR"
+};
+
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   try {
-    const [dataResponse, geoResponse] = await Promise.all([
-      fetch(DATA_URL),
+    const [generationResponse, flowsResponse, geoResponse] = await Promise.all([
+      fetch(GENERATION_URL),
+      fetch(FLOWS_URL),
       fetch(GEO_URL)
     ]);
 
-    if (!dataResponse.ok) {
-      throw new Error(`Could not load data file: ${DATA_URL}`);
+    if (!generationResponse.ok) {
+      throw new Error(`Could not load generation file: ${GENERATION_URL}`);
+    }
+
+    if (!flowsResponse.ok) {
+      throw new Error(`Could not load flow file: ${FLOWS_URL}`);
     }
 
     if (!geoResponse.ok) {
       throw new Error(`Could not load geo file: ${GEO_URL}`);
     }
 
-    const rawData = await dataResponse.json();
+    const rawGenerationData = await generationResponse.json();
+    const rawFlowData = await flowsResponse.json();
     geoData = await geoResponse.json();
 
-    generationData = deduplicateEnergyRows(normalizeData(rawData));
+    buildCountryNameLookup();
+
+    generationData = deduplicateEnergyRows(
+      normalizeGenerationData(rawGenerationData)
+    );
+
+    flowData = deduplicateFlowRows(
+      normalizeFlowData(rawFlowData)
+    );
 
     console.log("Generation rows after cleaning:", generationData.length);
-    console.log("GeoJSON features:", geoData.features.length);
-    console.log("Example data row:", generationData[0]);
+    console.log("Flow rows after cleaning:", flowData.length);
+    console.log("Example generation row:", generationData[0]);
+    console.log("Example flow row:", flowData[0]);
     console.log("Example geo properties:", geoData.features[0].properties);
 
     setupFilters();
     drawMap();
+    drawFlowNetworkMap();
     updateDashboard();
   } catch (error) {
     console.error(error);
@@ -98,7 +133,7 @@ async function init() {
    DATA NORMALIZATION
 ------------------------------------------------------- */
 
-function normalizeData(rawData) {
+function normalizeGenerationData(rawData) {
   let rows = rawData;
 
   if (!Array.isArray(rawData)) {
@@ -107,20 +142,96 @@ function normalizeData(rawData) {
   }
 
   return rows.map(row => {
-    const month = Number(row.Month);
-    const year = Number(row.Year);
+    const month = toNumber(pickValue(row, ["Month", "month"]));
+    const year = toNumber(pickValue(row, ["Year", "year"]));
 
     return {
       Month: month,
       Year: year,
       dateIndex: year * 12 + month,
-      Country: String(row.Country || "").trim(),
-      EnergySourceID: String(row.EnergySourceID || "").trim(),
-      EnergySource: String(row.EnergySource || "").trim(),
-      ValueInGWh: Number(row.ValueInGWh || 0),
-      "ShareIn%": Number(row["ShareIn%"] || 0)
+      Country: cleanCountryCode(pickValue(row, ["Country", "country"])),
+      EnergySourceID: cleanText(
+        pickValue(row, ["EnergySourceID", "energy_source_id"])
+      ),
+      EnergySource: cleanText(
+        pickValue(row, ["EnergySource", "energy_source"])
+      ),
+      ValueInGWh: toNumber(
+        pickValue(row, ["ValueInGWh", "value_gwh", "Value in GWh"])
+      ),
+      "ShareIn%": toNumber(
+        pickValue(row, ["ShareIn%", "share_percent", "ShareInPercent"])
+      )
     };
   });
+}
+
+function normalizeFlowData(rawData) {
+  let rows = rawData;
+
+  if (!Array.isArray(rawData)) {
+    const firstKey = Object.keys(rawData)[0];
+    rows = rawData[firstKey];
+  }
+
+  return rows.map(row => {
+    const month = toNumber(pickValue(row, ["Month", "month"]));
+    const year = toNumber(pickValue(row, ["Year", "year"]));
+
+    return {
+      Month: month,
+      Year: year,
+      dateIndex: year * 12 + month,
+
+      FromCountry: cleanCountryCode(
+        pickValue(row, [
+          "FromCountry",
+          "from_country",
+          "From Country",
+          "from country",
+          "FromCountryMapCode",
+          "From Country Map Code"
+        ])
+      ),
+
+      ToCountry: cleanCountryCode(
+        pickValue(row, [
+          "ToCountry",
+          "to_country",
+          "To Country",
+          "to country",
+          "ToCountryMapCode",
+          "To Country Map Code"
+        ])
+      ),
+
+      FlowDirection: cleanText(
+        pickValue(row, [
+          "FlowDirection",
+          "flow_direction",
+          "Direction",
+          "direction"
+        ])
+      ),
+
+      ValueInGWh: toNumber(
+        pickValue(row, [
+          "ValueInGWh",
+          "value_gwh",
+          "Value in GWh",
+          "Provided Value in GWh",
+          "provided value in gwh"
+        ])
+      )
+    };
+  }).filter(row =>
+    Number.isFinite(row.Year) &&
+    Number.isFinite(row.Month) &&
+    row.Month >= 1 &&
+    row.Month <= 12 &&
+    row.FromCountry &&
+    row.ToCountry
+  );
 }
 
 function deduplicateEnergyRows(rows) {
@@ -164,6 +275,34 @@ function deduplicateEnergyRows(rows) {
 
   if (duplicateCount > 0) {
     console.warn(`Removed ${duplicateCount} duplicate generation rows.`);
+  }
+
+  return [...seen.values()];
+}
+
+function deduplicateFlowRows(rows) {
+  const seen = new Map();
+  let duplicateCount = 0;
+
+  rows.forEach(row => {
+    const key = [
+      row.FromCountry,
+      row.ToCountry,
+      row.Year,
+      row.Month,
+      row.FlowDirection,
+      row.ValueInGWh
+    ].join("|");
+
+    if (!seen.has(key)) {
+      seen.set(key, row);
+    } else {
+      duplicateCount += 1;
+    }
+  });
+
+  if (duplicateCount > 0) {
+    console.warn(`Removed ${duplicateCount} exact duplicate flow rows.`);
   }
 
   return [...seen.values()];
@@ -341,7 +480,6 @@ function createTimelineTicks() {
   tickContainer.innerHTML = "";
 
   const max = timePeriods.length - 1;
-
   const yearTicks = [];
 
   timePeriods.forEach((period, index) => {
@@ -377,10 +515,13 @@ function createTimelineTicks() {
 }
 
 function setupCountryFilter() {
-  const countries = uniqueSorted(generationData.map(d => d.Country));
+  const generationCountries = generationData.map(d => d.Country);
+  const flowCountries = flowData.flatMap(d => [d.FromCountry, d.ToCountry]);
+
+  const countries = uniqueSorted([...generationCountries, ...flowCountries]);
 
   fillSelect("countryFilter", ["all", ...countries], value => {
-    return value === "all" ? "All Countries" : value;
+    return value === "all" ? "All Countries" : getDisplayCountry(value);
   });
 
   const countryFilter = document.getElementById("countryFilter");
@@ -471,24 +612,11 @@ function resetFilters() {
   }
 
   selectedMetric = "ShareIn%";
+  selectedNetworkCountry = null;
+
   updateMetricButtons();
   updateTimeLabels();
   updateDashboard();
-}
-
-function fillSelect(id, values, labelFunction = value => value) {
-  const select = document.getElementById(id);
-
-  if (!select) return;
-
-  select.innerHTML = "";
-
-  values.forEach(value => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = labelFunction(value);
-    select.appendChild(option);
-  });
 }
 
 function getFilters() {
@@ -550,7 +678,7 @@ function getReadableEnergySelection(selection) {
 }
 
 /* -------------------------------------------------------
-   MAP
+   GENERATION MAP
 ------------------------------------------------------- */
 
 function drawMap() {
@@ -589,7 +717,7 @@ function drawMap() {
 function updateMap(filters) {
   if (!svg) return;
 
-  const aggregatedByCountry = aggregateByCountry(generationData, filters);
+  const aggregatedByCountry = aggregateGenerationByCountry(generationData, filters);
 
   const values = [...aggregatedByCountry.values()]
     .map(row => row.selectedValue)
@@ -638,7 +766,7 @@ function updateMap(filters) {
   }
 }
 
-function aggregateByCountry(allRows, filters) {
+function aggregateGenerationByCountry(allRows, filters) {
   const countryMonthMap = new Map();
 
   allRows.forEach(row => {
@@ -685,9 +813,7 @@ function aggregateByCountry(allRows, filters) {
 
     const countryEntry = countryMap.get(monthEntry.country);
 
-    const monthlyShare =
-      (monthEntry.selectedGwh / monthEntry.totalGwh) * 100;
-
+    const monthlyShare = (monthEntry.selectedGwh / monthEntry.totalGwh) * 100;
     const safeMonthlyShare = Math.max(0, Math.min(100, monthlyShare));
 
     countryEntry.valueGwh += monthEntry.selectedGwh;
@@ -754,33 +880,907 @@ function onCountryClick(event, feature) {
 
   if (!countryFilter) return;
 
+  const hasOption = [...countryFilter.options].some(option => option.value === code);
+
+  if (!hasOption) return;
+
   if (countryFilter.value === code) {
     countryFilter.value = "all";
+    selectedNetworkCountry = null;
   } else {
     countryFilter.value = code;
+    selectedNetworkCountry = code;
   }
 
   updateDashboard();
 }
 
-function getGeoCountryCode(feature) {
-  return (
-    feature.properties.ISO2 ||
-    feature.properties.ISO_A2 ||
-    feature.properties.CNTR_ID ||
-    feature.properties.iso_a2 ||
-    feature.id
-  );
+/* -------------------------------------------------------
+   POWER FLOW VIEW
+------------------------------------------------------- */
+
+function updatePowerFlowView(filters) {
+  const flowSubtitle = document.getElementById("flowSubtitle");
+  const totalImports = document.getElementById("totalImports");
+  const totalExports = document.getElementById("totalExports");
+  const netBalance = document.getElementById("netBalance");
+
+  if (!flowSubtitle || !totalImports || !totalExports || !netBalance) {
+    return;
+  }
+
+  updateFlowNetworkMap(filters);
+
+  if (filters.country === "all") {
+    flowSubtitle.textContent =
+      `${filters.startLabel} to ${filters.endLabel}. The network shows aggregated country-to-country electricity exchanges. Hover or click a country node for details.`;
+
+    totalImports.textContent = "-";
+    totalExports.textContent = "-";
+    netBalance.textContent = "-";
+
+    renderFlowList("topImportList", [], "Hover or select a country to inspect imports.");
+    renderFlowList("topExportList", [], "Hover or select a country to inspect exports.");
+    return;
+  }
+
+  const result = aggregateFlowsForCountry(filters);
+
+  flowSubtitle.textContent =
+    `${getDisplayCountry(filters.country)}, ${filters.startLabel} to ${filters.endLabel}.`;
+
+  totalImports.textContent = `${formatNumber(result.totalImports)} GWh`;
+  totalExports.textContent = `${formatNumber(result.totalExports)} GWh`;
+
+  const balance = result.totalExports - result.totalImports;
+  netBalance.textContent = `${formatSignedNumber(balance)} GWh`;
+
+  renderFlowList("topImportList", result.topImports, "No import data available.");
+  renderFlowList("topExportList", result.topExports, "No export data available.");
 }
 
-function getGeoCountryName(feature) {
-  return (
-    feature.properties.NAME ||
-    feature.properties.NAME_ENGL ||
-    feature.properties.ADMIN ||
-    feature.properties.name ||
-    "Unknown"
+function aggregateFlowsForCountry(filters) {
+  const selectedCountry = filters.country;
+
+  const importPartners = new Map();
+  const exportPartners = new Map();
+
+  flowData.forEach(row => {
+    const timeMatch =
+      row.dateIndex >= filters.startIndex &&
+      row.dateIndex <= filters.endIndex;
+
+    if (!timeMatch) return;
+
+    const value = row.ValueInGWh;
+
+    if (!Number.isFinite(value) || value <= 0) return;
+
+    if (row.ToCountry === selectedCountry && row.FromCountry !== selectedCountry) {
+      addToMap(importPartners, row.FromCountry, value);
+    }
+
+    if (row.FromCountry === selectedCountry && row.ToCountry !== selectedCountry) {
+      addToMap(exportPartners, row.ToCountry, value);
+    }
+  });
+
+  const imports = mapToSortedPartnerArray(importPartners);
+  const exports = mapToSortedPartnerArray(exportPartners);
+
+  return {
+    imports,
+    exports,
+    topImports: imports.slice(0, 3),
+    topExports: exports.slice(0, 3),
+    totalImports: imports.reduce((sum, item) => sum + item.value, 0),
+    totalExports: exports.reduce((sum, item) => sum + item.value, 0)
+  };
+}
+
+function addToMap(map, key, value) {
+  map.set(key, (map.get(key) || 0) + value);
+}
+
+function mapToSortedPartnerArray(map) {
+  return [...map.entries()]
+    .map(([country, value]) => ({
+      country,
+      value
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function renderFlowList(listId, items, emptyMessage) {
+  const list = document.getElementById(listId);
+
+  if (!list) return;
+
+  list.innerHTML = "";
+
+  if (!items.length) {
+    const emptyItem = document.createElement("li");
+    emptyItem.className = "flow-empty";
+    emptyItem.textContent = emptyMessage;
+    list.appendChild(emptyItem);
+    return;
+  }
+
+  items.forEach(item => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <strong>${getDisplayCountry(item.country)}</strong><br>
+      <span class="partner-value">${formatNumber(item.value)} GWh</span>
+    `;
+    list.appendChild(li);
+  });
+}
+
+/* -------------------------------------------------------
+   FORCE-DIRECTED FLOW NETWORK
+------------------------------------------------------- */
+
+function drawFlowNetworkMap() {
+  const container = document.getElementById("flowNetworkMap");
+
+  if (!container) {
+    console.warn("Flow network container not found.");
+    return;
+  }
+
+  container.innerHTML = "";
+
+  flowSvg = d3.select("#flowNetworkMap")
+    .append("svg")
+    .attr("viewBox", `0 0 ${flowMapWidth} ${flowMapHeight}`)
+    .attr("preserveAspectRatio", "xMidYMid meet");
+
+  flowSvg.append("rect")
+    .attr("class", "network-background-click")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("width", flowMapWidth)
+    .attr("height", flowMapHeight)
+    .on("click", clearCountrySelectionFromNetwork);
+
+  flowSvg.append("g").attr("class", "network-links-layer");
+  flowSvg.append("g").attr("class", "network-nodes-layer");
+  flowSvg.append("g").attr("class", "network-labels-layer");
+  flowSvg.append("g").attr("class", "network-legend");
+
+  drawNetworkLegend();
+}
+
+function drawNetworkLegend() {
+  const legend = flowSvg.select(".network-legend");
+
+  legend.selectAll("*").remove();
+
+  const x = 20;
+  const y = 24;
+
+  legend.append("text")
+    .attr("class", "network-legend-title")
+    .attr("x", x)
+    .attr("y", y)
+    .text("Interaction guide");
+
+  legend.append("circle")
+    .attr("cx", x + 8)
+    .attr("cy", y + 24)
+    .attr("r", 6)
+    .attr("fill", "#ffffff")
+    .attr("stroke", "#3B82F6")
+    .attr("stroke-width", 2.5);
+
+  legend.append("text")
+    .attr("x", x + 24)
+    .attr("y", y + 28)
+    .text("Net importer");
+
+  legend.append("circle")
+    .attr("cx", x + 8)
+    .attr("cy", y + 46)
+    .attr("r", 6)
+    .attr("fill", "#ffffff")
+    .attr("stroke", "#D96C50")
+    .attr("stroke-width", 2.5);
+
+  legend.append("text")
+    .attr("x", x + 24)
+    .attr("y", y + 50)
+    .text("Net exporter");
+
+  legend.append("line")
+    .attr("x1", x)
+    .attr("x2", x + 18)
+    .attr("y1", y + 70)
+    .attr("y2", y + 70)
+    .attr("stroke", "#3B82F6")
+    .attr("stroke-width", 4);
+
+  legend.append("text")
+    .attr("x", x + 24)
+    .attr("y", y + 74)
+    .text("Focused country imports");
+
+  legend.append("line")
+    .attr("x1", x)
+    .attr("x2", x + 18)
+    .attr("y1", y + 92)
+    .attr("y2", y + 92)
+    .attr("stroke", "#D96C50")
+    .attr("stroke-width", 4);
+
+  legend.append("text")
+    .attr("x", x + 24)
+    .attr("y", y + 96)
+    .text("Focused country exports");
+
+  legend.append("text")
+    .attr("x", x)
+    .attr("y", y + 120)
+    .text("Click empty space to reset.");
+}
+
+function updateFlowNetworkMap(filters) {
+  if (!flowSvg) return;
+
+  const subtitle = document.getElementById("flowNetworkSubtitle");
+
+  const linksLayer = flowSvg.select(".network-links-layer");
+  const nodesLayer = flowSvg.select(".network-nodes-layer");
+  const labelsLayer = flowSvg.select(".network-labels-layer");
+
+  linksLayer.selectAll("*").remove();
+  nodesLayer.selectAll("*").remove();
+  labelsLayer.selectAll("*").remove();
+
+  selectedNetworkCountry =
+    filters.country !== "all"
+      ? filters.country
+      : null;
+
+  const networkData = buildFlowNetworkData(filters);
+  lastNetworkData = networkData;
+
+  const nodes = networkData.nodes;
+  const links = networkData.links;
+
+  if (!nodes.length || !links.length) {
+    if (subtitle) {
+      subtitle.textContent = "No flow connections available for the selected time range.";
+    }
+    return;
+  }
+
+  if (subtitle) {
+    subtitle.textContent =
+      `${filters.startLabel} to ${filters.endLabel}. Shared arches show aggregated exchange between two countries. Hover or click a node for import/export details.`;
+  }
+
+  const maxLinkValue = d3.max(links, d => d.value) || 1;
+  const maxNodeValue = d3.max(nodes, d => d.totalFlow) || 1;
+
+  const linkWidthScale = d3.scaleSqrt()
+    .domain([0, maxLinkValue])
+    .range([0.35, 5.5]);
+
+  const linkOpacityScale = d3.scaleSqrt()
+    .domain([0, maxLinkValue])
+    .range([0.035, 0.34]);
+
+  const nodeRadiusScale = d3.scaleSqrt()
+    .domain([0, maxNodeValue])
+    .range([6, 24]);
+
+  nodes.forEach((node, index) => {
+    node.baseRadius = nodeRadiusScale(node.totalFlow);
+    node.isImportant = index < 22;
+    node.balance = node.exports - node.imports;
+    node.balanceRatio =
+      node.totalFlow > 0
+        ? node.balance / node.totalFlow
+        : 0;
+  });
+
+  const backboneCount = Math.max(18, Math.round(links.length * 0.18));
+  const backboneIds = new Set(
+    links
+      .slice(0, backboneCount)
+      .map(link => link.id)
   );
+
+  links.forEach(link => {
+    link.isBackbone = backboneIds.has(link.id);
+  });
+
+  prepareNetworkLayout(nodes, links);
+
+  linksLayer.selectAll("path")
+    .data(links, d => d.id)
+    .join("path")
+    .attr("class", d => {
+      return d.isBackbone
+        ? "network-link backbone"
+        : "network-link";
+    })
+    .attr("d", createNetworkLinkPath)
+    .attr("stroke-width", d => linkWidthScale(d.value))
+    .attr("data-base-width", d => linkWidthScale(d.value))
+    .attr("data-base-opacity", d => linkOpacityScale(d.value))
+    .style("opacity", d => linkOpacityScale(d.value))
+    .on("mousemove", function(event, d) {
+      showNetworkLinkTooltip(event, d);
+    })
+    .on("mouseleave", function() {
+      hideTooltip();
+      restoreSelectedNetworkFocus();
+    });
+
+  nodesLayer.selectAll("circle")
+    .data(nodes, d => d.id)
+    .join("circle")
+    .attr("class", d => {
+      return `network-node ${getNodeBalanceClass(d)}`;
+    })
+    .attr("cx", d => d.x)
+    .attr("cy", d => d.y)
+    .attr("r", d => d.baseRadius)
+    .on("mouseenter", function(event, d) {
+      focusNetworkNode(d.id);
+      showNetworkNodeTooltip(event, d.id);
+    })
+    .on("mousemove", function(event, d) {
+      showNetworkNodeTooltip(event, d.id);
+    })
+    .on("mouseleave", function() {
+      hideTooltip();
+      restoreSelectedNetworkFocus();
+    })
+    .on("click", function(event, d) {
+      event.stopPropagation();
+      setCountryFilterFromNetworkNode(d.id);
+    });
+
+  labelsLayer.selectAll("text")
+    .data(nodes, d => d.id)
+    .join("text")
+    .attr("class", d => {
+      return d.isImportant
+        ? "network-label important"
+        : "network-label";
+    })
+    .attr("x", d => d.x)
+    .attr("y", d => d.y + 4)
+    .text(d => d.id);
+
+  restoreSelectedNetworkFocus();
+}
+
+function buildFlowNetworkData(filters) {
+  const nodeMap = new Map();
+  const pairMap = new Map();
+
+  flowData.forEach(row => {
+    const timeMatch =
+      row.dateIndex >= filters.startIndex &&
+      row.dateIndex <= filters.endIndex;
+
+    if (!timeMatch) return;
+
+    const value = row.ValueInGWh;
+
+    if (!Number.isFinite(value) || value <= 0) return;
+    if (!row.FromCountry || !row.ToCountry) return;
+    if (row.FromCountry === row.ToCountry) return;
+
+    const source = row.FromCountry;
+    const target = row.ToCountry;
+
+    if (!nodeMap.has(source)) {
+      nodeMap.set(source, createNetworkNode(source));
+    }
+
+    if (!nodeMap.has(target)) {
+      nodeMap.set(target, createNetworkNode(target));
+    }
+
+    const sourceNode = nodeMap.get(source);
+    const targetNode = nodeMap.get(target);
+
+    sourceNode.exports += value;
+    sourceNode.totalFlow += value;
+
+    targetNode.imports += value;
+    targetNode.totalFlow += value;
+
+    const countries = [source, target].sort();
+    const countryA = countries[0];
+    const countryB = countries[1];
+    const pairKey = `${countryA}|${countryB}`;
+
+    if (!pairMap.has(pairKey)) {
+      pairMap.set(pairKey, {
+        id: pairKey,
+        source: countryA,
+        target: countryB,
+        sourceCode: countryA,
+        targetCode: countryB,
+        countryA,
+        countryB,
+        valueAB: 0,
+        valueBA: 0,
+        value: 0,
+        isBackbone: false
+      });
+    }
+
+    const pair = pairMap.get(pairKey);
+
+    if (source === countryA && target === countryB) {
+      pair.valueAB += value;
+    } else {
+      pair.valueBA += value;
+    }
+
+    pair.value += value;
+  });
+
+  const nodes = [...nodeMap.values()].sort((a, b) => {
+    return b.totalFlow - a.totalFlow;
+  });
+
+  const links = [...pairMap.values()].sort((a, b) => {
+    return b.value - a.value;
+  });
+
+  return {
+    nodes,
+    links
+  };
+}
+
+function createNetworkNode(countryCode) {
+  return {
+    id: countryCode,
+    imports: 0,
+    exports: 0,
+    totalFlow: 0,
+    balance: 0,
+    balanceRatio: 0,
+    x: 0,
+    y: 0,
+    anchorX: 0,
+    anchorY: 0,
+    baseRadius: 8,
+    isImportant: false
+  };
+}
+
+function getNodeBalanceClass(node) {
+  if (node.balanceRatio > 0.08) {
+    return "net-exporter";
+  }
+
+  if (node.balanceRatio < -0.08) {
+    return "net-importer";
+  }
+
+  return "net-balanced";
+}
+
+function prepareNetworkLayout(nodes, links) {
+  const centerX = flowMapWidth / 2;
+  const centerY = flowMapHeight / 2;
+
+  if (!networkAnchorProjection || !networkAnchorPath) {
+    networkAnchorProjection = d3.geoMercator()
+      .fitExtent(
+        [
+          [85, 70],
+          [flowMapWidth - 70, flowMapHeight - 55]
+        ],
+        geoData
+      );
+
+    networkAnchorPath = d3.geoPath().projection(networkAnchorProjection);
+  }
+
+  const fallbackRadius = Math.min(flowMapWidth, flowMapHeight) * 0.32;
+
+  nodes.forEach((node, index) => {
+    const anchorPoint = getNetworkAnchorPoint(node.id);
+
+    if (anchorPoint) {
+      node.anchorX = anchorPoint[0];
+      node.anchorY = anchorPoint[1];
+    } else {
+      const angle = (index / nodes.length) * Math.PI * 2;
+
+      node.anchorX = centerX + Math.cos(angle) * fallbackRadius;
+      node.anchorY = centerY + Math.sin(angle) * fallbackRadius;
+    }
+
+    node.x = node.anchorX;
+    node.y = node.anchorY;
+  });
+
+  const maxLinkValue = d3.max(links, d => d.value) || 1;
+
+  const simulation = d3.forceSimulation(nodes)
+    .force(
+      "link",
+      d3.forceLink(links)
+        .id(d => d.id)
+        .distance(d => {
+          const strength = Math.sqrt(d.value / maxLinkValue);
+          return 140 - strength * 55;
+        })
+        .strength(0.038)
+    )
+    .force("charge", d3.forceManyBody().strength(-115))
+    .force("collision", d3.forceCollide().radius(d => d.baseRadius + 10))
+    .force("x", d3.forceX(d => d.anchorX).strength(0.26))
+    .force("y", d3.forceY(d => d.anchorY).strength(0.26))
+    .force("center", d3.forceCenter(centerX, centerY))
+    .stop();
+
+  for (let i = 0; i < 250; i++) {
+    simulation.tick();
+  }
+}
+
+function getNetworkAnchorPoint(countryCode) {
+  if (!geoData || !geoData.features || !networkAnchorPath) {
+    return null;
+  }
+
+  const cleanCode = cleanCountryCode(countryCode);
+
+  const feature = geoData.features.find(feature => {
+    return getGeoCountryCode(feature) === cleanCode;
+  });
+
+  if (!feature) {
+    return null;
+  }
+
+  const point = networkAnchorPath.centroid(feature);
+
+  if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+    return null;
+  }
+
+  return point;
+}
+
+function createNetworkLinkPath(link) {
+  const source = link.source;
+  const target = link.target;
+
+  const x1 = source.x;
+  const y1 = source.y;
+  const x2 = target.x;
+  const y2 = target.y;
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance === 0) {
+    return `M ${x1},${y1} L ${x2},${y2}`;
+  }
+
+  const curveStrength = Math.min(55, distance * 0.18);
+
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+
+  const normalX = -dy / distance;
+  const normalY = dx / distance;
+
+  const controlX = midX + normalX * curveStrength;
+  const controlY = midY + normalY * curveStrength;
+
+  return `M ${x1},${y1} Q ${controlX},${controlY} ${x2},${y2}`;
+}
+
+function focusNetworkNode(countryCode) {
+  if (!lastNetworkData || !flowSvg) return;
+
+  resetNetworkStyles();
+
+  const cleanCode = cleanCountryCode(countryCode);
+  const connectedCountries = new Set([cleanCode]);
+
+  lastNetworkData.links.forEach(link => {
+    if (link.countryA === cleanCode) {
+      connectedCountries.add(link.countryB);
+    }
+
+    if (link.countryB === cleanCode) {
+      connectedCountries.add(link.countryA);
+    }
+  });
+
+  flowSvg.selectAll(".network-link")
+    .classed("dimmed", d => {
+      return d.countryA !== cleanCode && d.countryB !== cleanCode;
+    })
+    .classed("incoming-highlight", d => {
+      const relation = getPairRelationForCountry(d, cleanCode);
+      return relation === "incoming";
+    })
+    .classed("outgoing-highlight", d => {
+      const relation = getPairRelationForCountry(d, cleanCode);
+      return relation === "outgoing";
+    })
+    .classed("bidirectional-highlight", d => {
+      const relation = getPairRelationForCountry(d, cleanCode);
+      return relation === "balanced";
+    })
+    .attr("stroke-width", function(d) {
+      const baseWidth = Number(d3.select(this).attr("data-base-width")) || 1;
+
+      if (d.countryA === cleanCode || d.countryB === cleanCode) {
+        return baseWidth + 2;
+      }
+
+      return baseWidth;
+    });
+
+  flowSvg.selectAll(".network-link")
+    .filter(d => d.countryA === cleanCode || d.countryB === cleanCode)
+    .raise();
+
+  flowSvg.selectAll(".network-node")
+    .classed("dimmed", d => !connectedCountries.has(d.id))
+    .classed("hovered", d => d.id === cleanCode)
+    .classed("neighbor", d => d.id !== cleanCode && connectedCountries.has(d.id))
+    .attr("r", d => {
+      if (d.id === cleanCode) {
+        return d.baseRadius + 8;
+      }
+
+      if (connectedCountries.has(d.id)) {
+        return d.baseRadius + 3;
+      }
+
+      return d.baseRadius;
+    });
+
+  flowSvg.selectAll(".network-label")
+    .classed("dimmed", d => !connectedCountries.has(d.id))
+    .classed("highlighted", d => connectedCountries.has(d.id));
+}
+
+function getPairRelationForCountry(link, countryCode) {
+  const cleanCode = cleanCountryCode(countryCode);
+
+  if (link.countryA !== cleanCode && link.countryB !== cleanCode) {
+    return "none";
+  }
+
+  let importsToCountry = 0;
+  let exportsFromCountry = 0;
+
+  if (cleanCode === link.countryA) {
+    exportsFromCountry = link.valueAB;
+    importsToCountry = link.valueBA;
+  }
+
+  if (cleanCode === link.countryB) {
+    exportsFromCountry = link.valueBA;
+    importsToCountry = link.valueAB;
+  }
+
+  const difference = exportsFromCountry - importsToCountry;
+  const total = exportsFromCountry + importsToCountry;
+
+  if (total <= 0) {
+    return "none";
+  }
+
+  const ratio = difference / total;
+
+  if (ratio > 0.15) {
+    return "outgoing";
+  }
+
+  if (ratio < -0.15) {
+    return "incoming";
+  }
+
+  return "balanced";
+}
+
+function clearNetworkFocus() {
+  resetNetworkStyles();
+}
+
+function restoreSelectedNetworkFocus() {
+  if (selectedNetworkCountry) {
+    focusNetworkNode(selectedNetworkCountry);
+  } else {
+    clearNetworkFocus();
+  }
+}
+
+function resetNetworkStyles() {
+  if (!flowSvg) return;
+
+  flowSvg.selectAll(".network-link")
+    .classed("dimmed", false)
+    .classed("incoming-highlight", false)
+    .classed("outgoing-highlight", false)
+    .classed("bidirectional-highlight", false)
+    .attr("stroke-width", function() {
+      return Number(d3.select(this).attr("data-base-width")) || 1;
+    })
+    .style("opacity", function() {
+      return Number(d3.select(this).attr("data-base-opacity")) || 0.08;
+    });
+
+  flowSvg.selectAll(".network-node")
+    .classed("dimmed", false)
+    .classed("hovered", false)
+    .classed("neighbor", false)
+    .attr("r", d => d.baseRadius);
+
+  flowSvg.selectAll(".network-label")
+    .classed("dimmed", false)
+    .classed("highlighted", false);
+}
+
+function showNetworkNodeTooltip(event, countryCode) {
+  if (!lastNetworkData) return;
+
+  const node = lastNetworkData.nodes.find(item => item.id === countryCode);
+
+  if (!node) return;
+
+  const incoming = getTopNetworkLinks(countryCode, "incoming", 5);
+  const outgoing = getTopNetworkLinks(countryCode, "outgoing", 5);
+
+  const incomingHtml = incoming.length
+    ? incoming.map(link => {
+        return `${getDisplayCountry(link.sourceCode)}: ${formatNumber(link.value)} GWh`;
+      }).join("<br>")
+    : "No imports";
+
+  const outgoingHtml = outgoing.length
+    ? outgoing.map(link => {
+        return `${getDisplayCountry(link.targetCode)}: ${formatNumber(link.value)} GWh`;
+      }).join("<br>")
+    : "No exports";
+
+  const balance = node.exports - node.imports;
+
+  const role =
+    balance > 0
+      ? "Net exporter"
+      : balance < 0
+        ? "Net importer"
+        : "Balanced";
+
+  d3.select("#tooltip")
+    .style("opacity", 1)
+    .html(`
+      <strong>${getDisplayCountry(countryCode)}</strong><br>
+      Role: ${role}<br>
+      Total imports: ${formatNumber(node.imports)} GWh<br>
+      Total exports: ${formatNumber(node.exports)} GWh<br>
+      Net balance: ${formatSignedNumber(balance)} GWh<br><br>
+      <strong>Top incoming links</strong><br>
+      ${incomingHtml}<br><br>
+      <strong>Top outgoing links</strong><br>
+      ${outgoingHtml}<br><br>
+      <em>Click to lock this country. Click empty space to reset.</em>
+    `)
+    .style("left", `${event.pageX + 14}px`)
+    .style("top", `${event.pageY + 14}px`);
+}
+
+function showNetworkLinkTooltip(event, link) {
+  d3.select("#tooltip")
+    .style("opacity", 1)
+    .html(`
+      <strong>Electricity exchange</strong><br>
+      ${getDisplayCountry(link.countryA)} → ${getDisplayCountry(link.countryB)}:
+      ${formatNumber(link.valueAB)} GWh<br>
+      ${getDisplayCountry(link.countryB)} → ${getDisplayCountry(link.countryA)}:
+      ${formatNumber(link.valueBA)} GWh<br>
+      Total exchange: ${formatNumber(link.value)} GWh
+    `)
+    .style("left", `${event.pageX + 14}px`)
+    .style("top", `${event.pageY + 14}px`);
+}
+
+function getTopNetworkLinks(countryCode, direction, limit) {
+  if (!lastNetworkData) return [];
+
+  const cleanCode = cleanCountryCode(countryCode);
+
+  return lastNetworkData.links
+    .map(link => {
+      if (link.countryA !== cleanCode && link.countryB !== cleanCode) {
+        return null;
+      }
+
+      let partner = null;
+      let incomingValue = 0;
+      let outgoingValue = 0;
+
+      if (cleanCode === link.countryA) {
+        partner = link.countryB;
+        outgoingValue = link.valueAB;
+        incomingValue = link.valueBA;
+      }
+
+      if (cleanCode === link.countryB) {
+        partner = link.countryA;
+        outgoingValue = link.valueBA;
+        incomingValue = link.valueAB;
+      }
+
+      return {
+        partner,
+        incomingValue,
+        outgoingValue,
+        link
+      };
+    })
+    .filter(item => item !== null)
+    .map(item => {
+      if (direction === "incoming") {
+        return {
+          sourceCode: item.partner,
+          targetCode: cleanCode,
+          value: item.incomingValue
+        };
+      }
+
+      return {
+        sourceCode: cleanCode,
+        targetCode: item.partner,
+        value: item.outgoingValue
+      };
+    })
+    .filter(item => item.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+}
+
+function setCountryFilterFromNetworkNode(countryCode) {
+  const countryFilter = document.getElementById("countryFilter");
+
+  if (!countryFilter) return;
+
+  const cleanCode = cleanCountryCode(countryCode);
+
+  const hasOption = [...countryFilter.options].some(option => {
+    return option.value === cleanCode;
+  });
+
+  if (!hasOption) return;
+
+  selectedNetworkCountry = cleanCode;
+  countryFilter.value = cleanCode;
+
+  updateDashboard();
+}
+
+function clearCountrySelectionFromNetwork() {
+  const countryFilter = document.getElementById("countryFilter");
+
+  selectedNetworkCountry = null;
+
+  if (countryFilter) {
+    countryFilter.value = "all";
+  }
+
+  updateDashboard();
 }
 
 /* -------------------------------------------------------
@@ -793,10 +1793,11 @@ function updateDashboard() {
   updateKpis(filters);
   updateMap(filters);
   updateTitles(filters);
+  updatePowerFlowView(filters);
 }
 
 function updateKpis(filters) {
-  const aggregatedByCountry = aggregateByCountry(generationData, filters);
+  const aggregatedByCountry = aggregateGenerationByCountry(generationData, filters);
 
   const visibleEntries = [...aggregatedByCountry.values()].filter(entry => {
     return filters.country === "all" || entry.country === filters.country;
@@ -862,8 +1863,91 @@ function updateTitles(filters) {
 }
 
 /* -------------------------------------------------------
-   HELPERS
+   GEO HELPERS
 ------------------------------------------------------- */
+
+function buildCountryNameLookup() {
+  countryNameLookup = new Map();
+
+  if (!geoData || !geoData.features) return;
+
+  geoData.features.forEach(feature => {
+    const code = getGeoCountryCode(feature);
+    const name = getGeoCountryName(feature);
+
+    if (code && name) {
+      countryNameLookup.set(code, name);
+    }
+  });
+}
+
+function getGeoCountryCode(feature) {
+  return cleanCountryCode(
+    feature.properties.ISO2 ||
+    feature.properties.ISO_A2 ||
+    feature.properties.CNTR_ID ||
+    feature.properties.iso_a2 ||
+    feature.id
+  );
+}
+
+function getGeoCountryName(feature) {
+  return (
+    feature.properties.NAME ||
+    feature.properties.NAME_ENGL ||
+    feature.properties.ADMIN ||
+    feature.properties.name ||
+    "Unknown"
+  );
+}
+
+function getDisplayCountry(code) {
+  const cleanCode = cleanCountryCode(code);
+  const name = countryNameLookup.get(cleanCode);
+
+  if (!name || name === cleanCode) {
+    return cleanCode;
+  }
+
+  return `${name} (${cleanCode})`;
+}
+
+/* -------------------------------------------------------
+   GENERAL HELPERS
+------------------------------------------------------- */
+
+function pickValue(row, keys) {
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null) {
+      return row[key];
+    }
+  }
+
+  return null;
+}
+
+function cleanText(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function cleanCountryCode(value) {
+  const text = cleanText(value).toUpperCase();
+
+  if (!text) return "";
+
+  return countryCodeAliases[text] || text;
+}
+
+function toNumber(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  return number;
+}
 
 function uniqueSorted(values) {
   return [...new Set(values)]
@@ -877,10 +1961,30 @@ function uniqueSorted(values) {
     });
 }
 
+function fillSelect(id, values, labelFunction = value => value) {
+  const select = document.getElementById(id);
+
+  if (!select) return;
+
+  select.innerHTML = "";
+
+  values.forEach(value => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = labelFunction(value);
+    select.appendChild(option);
+  });
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-US", {
     maximumFractionDigits: 1
   });
+}
+
+function formatSignedNumber(value) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)}`;
 }
 
 function average(values) {
