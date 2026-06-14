@@ -1,4 +1,4 @@
-const DATA_URL = "data/entsoe_domestic_generation_2023_2025.json";
+const DATA_URL = "data/entsoe_domestic_generation_2019_2025.json";
 const GEO_URL = "data/europe.geojson";
 
 let generationData = [];
@@ -32,9 +32,11 @@ const renewableSources = [
   "Geothermal",
   "Hydro Pumped Storage",
   "Hydro Run-of-river and poundage",
+  "Hydro Run-Of-River And Poundage",
   "Hydro Water Reservoir",
   "Marine",
   "Other renewable",
+  "Other Renewable",
   "Solar",
   "Waste",
   "Wind Offshore",
@@ -43,6 +45,8 @@ const renewableSources = [
 
 const fossilSources = [
   "Fossil Brown coal/Lignite",
+  "Fossil Brown Coal/Lignite",
+  "Fossil Brown Coal Lignite",
   "Fossil Coal-derived gas",
   "Fossil Coal Derived Gas",
   "Fossil Gas",
@@ -74,9 +78,9 @@ async function init() {
     const rawData = await dataResponse.json();
     geoData = await geoResponse.json();
 
-    generationData = normalizeData(rawData);
+    generationData = deduplicateEnergyRows(normalizeData(rawData));
 
-    console.log("Generation rows:", generationData.length);
+    console.log("Generation rows after cleaning:", generationData.length);
     console.log("GeoJSON features:", geoData.features.length);
     console.log("Example data row:", generationData[0]);
     console.log("Example geo properties:", geoData.features[0].properties);
@@ -117,6 +121,52 @@ function normalizeData(rawData) {
       "ShareIn%": Number(row["ShareIn%"] || 0)
     };
   });
+}
+
+function deduplicateEnergyRows(rows) {
+  const seen = new Map();
+  let duplicateCount = 0;
+
+  rows.forEach(row => {
+    if (
+      !Number.isFinite(row.Year) ||
+      !Number.isFinite(row.Month) ||
+      row.Month < 1 ||
+      row.Month > 12 ||
+      !row.Country ||
+      !row.EnergySource
+    ) {
+      return;
+    }
+
+    const key = [
+      row.Country,
+      row.Year,
+      row.Month,
+      row.EnergySourceID || row.EnergySource
+    ].join("|");
+
+    if (!seen.has(key)) {
+      seen.set(key, row);
+    } else {
+      duplicateCount += 1;
+
+      const existing = seen.get(key);
+
+      if (
+        (existing.ValueInGWh === 0 || !Number.isFinite(existing.ValueInGWh)) &&
+        row.ValueInGWh > 0
+      ) {
+        seen.set(key, row);
+      }
+    }
+  });
+
+  if (duplicateCount > 0) {
+    console.warn(`Removed ${duplicateCount} duplicate generation rows.`);
+  }
+
+  return [...seen.values()];
 }
 
 /* -------------------------------------------------------
@@ -292,27 +342,36 @@ function createTimelineTicks() {
 
   const max = timePeriods.length - 1;
 
+  const yearTicks = [];
+
   timePeriods.forEach((period, index) => {
-    const showTick =
-      period.month === 1 ||
-      period.month === 6 ||
-      period.month === 12 ||
-      timePeriods.length <= 12;
+    const isFirstPeriod = index === 0;
+    const isJanuary = period.month === 1;
 
-    if (!showTick) return;
-
-    const tick = document.createElement("span");
-    tick.className = "timeline-tick";
-    tick.style.left = `${(index / max) * 100}%`;
-
-    if (period.month === 1) {
-      tick.textContent = period.year;
-    } else if (timePeriods.length <= 12) {
-      tick.textContent = period.month;
-    } else {
-      tick.textContent = "";
+    if (isFirstPeriod || isJanuary) {
+      yearTicks.push({
+        ...period,
+        sliderIndex: index
+      });
     }
+  });
 
+  const maxVisibleLabels = 5;
+  const labelStep = Math.ceil(yearTicks.length / maxVisibleLabels);
+
+  yearTicks.forEach((period, index) => {
+    const tick = document.createElement("span");
+    tick.className = "timeline-tick tick-major";
+
+    const left = (period.sliderIndex / max) * 100;
+    tick.style.left = `${left}%`;
+
+    const shouldShowLabel =
+      index === 0 ||
+      index === yearTicks.length - 1 ||
+      index % labelStep === 0;
+
+    tick.textContent = shouldShowLabel ? period.year : "";
     tickContainer.appendChild(tick);
   });
 }
@@ -530,13 +589,7 @@ function drawMap() {
 function updateMap(filters) {
   if (!svg) return;
 
-  const rowsForMap = generationData.filter(row =>
-    row.dateIndex >= filters.startIndex &&
-    row.dateIndex <= filters.endIndex &&
-    matchesEnergySelection(row, filters.energySelection)
-  );
-
-  const aggregatedByCountry = aggregateByCountry(rowsForMap, filters.metric);
+  const aggregatedByCountry = aggregateByCountry(generationData, filters);
 
   const values = [...aggregatedByCountry.values()]
     .map(row => row.selectedValue)
@@ -585,10 +638,16 @@ function updateMap(filters) {
   }
 }
 
-function aggregateByCountry(rows, metric) {
+function aggregateByCountry(allRows, filters) {
   const countryMonthMap = new Map();
 
-  rows.forEach(row => {
+  allRows.forEach(row => {
+    const timeMatch =
+      row.dateIndex >= filters.startIndex &&
+      row.dateIndex <= filters.endIndex;
+
+    if (!timeMatch) return;
+
     const key = `${row.Country}-${row.Year}-${row.Month}`;
 
     if (!countryMonthMap.has(key)) {
@@ -596,20 +655,25 @@ function aggregateByCountry(rows, metric) {
         country: row.Country,
         year: row.Year,
         month: row.Month,
-        valueGwh: 0,
-        sharePercent: 0
+        totalGwh: 0,
+        selectedGwh: 0
       });
     }
 
     const entry = countryMonthMap.get(key);
 
-    entry.valueGwh += row.ValueInGWh;
-    entry.sharePercent += row["ShareIn%"];
+    entry.totalGwh += row.ValueInGWh;
+
+    if (matchesEnergySelection(row, filters.energySelection)) {
+      entry.selectedGwh += row.ValueInGWh;
+    }
   });
 
   const countryMap = new Map();
 
   countryMonthMap.forEach(monthEntry => {
+    if (monthEntry.totalGwh <= 0) return;
+
     if (!countryMap.has(monthEntry.country)) {
       countryMap.set(monthEntry.country, {
         country: monthEntry.country,
@@ -621,12 +685,17 @@ function aggregateByCountry(rows, metric) {
 
     const countryEntry = countryMap.get(monthEntry.country);
 
-    countryEntry.valueGwh += monthEntry.valueGwh;
-    countryEntry.monthlyShares.push(monthEntry.sharePercent);
+    const monthlyShare =
+      (monthEntry.selectedGwh / monthEntry.totalGwh) * 100;
+
+    const safeMonthlyShare = Math.max(0, Math.min(100, monthlyShare));
+
+    countryEntry.valueGwh += monthEntry.selectedGwh;
+    countryEntry.monthlyShares.push(safeMonthlyShare);
   });
 
   countryMap.forEach(countryEntry => {
-    if (metric === "ValueInGWh") {
+    if (filters.metric === "ValueInGWh") {
       countryEntry.selectedValue = countryEntry.valueGwh;
     } else {
       countryEntry.selectedValue = average(countryEntry.monthlyShares);
@@ -721,39 +790,30 @@ function getGeoCountryName(feature) {
 function updateDashboard() {
   const filters = getFilters();
 
-  const filteredRows = generationData.filter(row => {
-    const timeMatch =
-      row.dateIndex >= filters.startIndex &&
-      row.dateIndex <= filters.endIndex;
-
-    const energyMatch = matchesEnergySelection(row, filters.energySelection);
-
-    const countryMatch =
-      filters.country === "all" || row.Country === filters.country;
-
-    return timeMatch && energyMatch && countryMatch;
-  });
-
-  updateKpis(filteredRows, filters);
+  updateKpis(filters);
   updateMap(filters);
   updateTitles(filters);
 }
 
-function updateKpis(filteredRows, filters) {
-  const totalGWh = filteredRows.reduce((sum, row) => {
-    return sum + row.ValueInGWh;
+function updateKpis(filters) {
+  const aggregatedByCountry = aggregateByCountry(generationData, filters);
+
+  const visibleEntries = [...aggregatedByCountry.values()].filter(entry => {
+    return filters.country === "all" || entry.country === filters.country;
+  });
+
+  const totalGWh = visibleEntries.reduce((sum, entry) => {
+    return sum + entry.valueGwh;
   }, 0);
 
-  const countries = new Set(
-    filteredRows
-      .filter(row => row.ValueInGWh > 0)
-      .map(row => row.Country)
-  );
+  const countriesWithDataCount = visibleEntries.filter(entry => {
+    return entry.valueGwh > 0;
+  }).length;
 
-  const aggregated = aggregateByCountry(filteredRows, "ShareIn%");
-  const shareAverage = average(
-    [...aggregated.values()].map(entry => entry.selectedValue)
-  );
+  const shareValue =
+    filters.country === "all"
+      ? average(visibleEntries.map(entry => entry.selectedValue))
+      : visibleEntries[0]?.selectedValue || 0;
 
   const selectedTotal = document.getElementById("selectedTotal");
   const countriesWithData = document.getElementById("countriesWithData");
@@ -764,11 +824,11 @@ function updateKpis(filteredRows, filters) {
     selectedTotal.textContent =
       filters.metric === "ValueInGWh"
         ? `${formatNumber(totalGWh)} GWh`
-        : `${formatNumber(shareAverage)}% avg`;
+        : `${formatNumber(shareValue)}% avg`;
   }
 
   if (countriesWithData) {
-    countriesWithData.textContent = countries.size;
+    countriesWithData.textContent = countriesWithDataCount;
   }
 
   if (selectedSource) {

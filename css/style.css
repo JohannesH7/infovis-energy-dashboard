@@ -281,10 +281,16 @@ body {
   content: "";
   display: block;
   width: 1px;
-  height: 7px;
+  height: 8px;
   background: var(--grey);
   margin: 0 auto 3px auto;
-  opacity: 0.65;
+  opacity: 0.5;
+}
+
+.timeline-tick.tick-major::before {
+  height: 9px;
+  background: var(--navy);
+  opacity: 0.75;
 }
 
 .timeline-actions {
