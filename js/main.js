@@ -13,11 +13,13 @@ let flowSvg = null;
 let lastNetworkData = null;
 let networkAnchorProjection = null;
 let networkAnchorPath = null;
-let selectedNetworkCountry = null;
 
 let selectedMetric = "ShareIn%";
+let selectedCountries = new Set();
 let timePeriods = [];
 let countryNameLookup = new Map();
+let sidebarTipIndex = 0;
+let sidebarTipTimer = null;
 
 const mapWidth = 900;
 const mapHeight = 610;
@@ -322,7 +324,51 @@ function setupFilters() {
 
   if (resetButton) {
     resetButton.addEventListener("click", resetFilters);
+    setupCompactFilterHeader(resetButton);
   }
+}
+
+function setupCompactFilterHeader(resetButton) {
+  const filterPanel = document.querySelector(".sidebar .panel:first-child");
+
+  if (!filterPanel || !resetButton) return;
+
+  const title = filterPanel.querySelector("h2");
+
+  if (!title) return;
+
+  resetButton.classList.add("icon-reset");
+  resetButton.setAttribute("title", "Reset filters");
+  resetButton.setAttribute("aria-label", "Reset filters");
+  resetButton.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M4 6h10M4 12h7M4 18h10"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <path
+        d="M17 9l4 4M21 9l-4 4"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </svg>
+  `;
+
+  let heading = filterPanel.querySelector(".filter-panel-heading");
+
+  if (!heading) {
+    heading = document.createElement("div");
+    heading.className = "filter-panel-heading";
+    filterPanel.insertBefore(heading, title);
+    heading.appendChild(title);
+  }
+
+  heading.appendChild(resetButton);
 }
 
 function setupTimeRangeFilter() {
@@ -528,7 +574,15 @@ function setupCountryFilter() {
 
   if (countryFilter) {
     countryFilter.value = "all";
-    countryFilter.addEventListener("change", updateDashboard);
+    countryFilter.addEventListener("change", () => {
+      selectedCountries.clear();
+
+      if (countryFilter.value !== "all") {
+        selectedCountries.add(countryFilter.value);
+      }
+
+      updateDashboard();
+    });
   }
 }
 
@@ -603,6 +657,8 @@ function resetFilters() {
     endSlider.value = timePeriods.length - 1;
   }
 
+  selectedCountries.clear();
+
   if (countryFilter) {
     countryFilter.value = "all";
   }
@@ -612,7 +668,6 @@ function resetFilters() {
   }
 
   selectedMetric = "ShareIn%";
-  selectedNetworkCountry = null;
 
   updateMetricButtons();
   updateTimeLabels();
@@ -629,15 +684,90 @@ function getFilters() {
   const startPeriod = timePeriods[startSliderIndex];
   const endPeriod = timePeriods[endSliderIndex];
 
+  const countries = [...selectedCountries];
+
   return {
     startIndex: startPeriod?.index,
     endIndex: endPeriod?.index,
     startLabel: startPeriod?.label || "-",
     endLabel: endPeriod?.label || "-",
-    country: document.getElementById("countryFilter")?.value || "all",
+    country:
+      countries.length === 0
+        ? "all"
+        : countries.length === 1
+          ? countries[0]
+          : "multiple",
+    countries,
     energySelection: document.getElementById("energySourceFilter")?.value || "group:renewable",
     metric: selectedMetric
   };
+}
+
+/* -------------------------------------------------------
+   COUNTRY SELECTION HELPERS
+------------------------------------------------------- */
+
+function getCountrySet(filters) {
+  return new Set(filters.countries || []);
+}
+
+function hasCountrySelection(filters) {
+  return (filters.countries || []).length > 0;
+}
+
+function isCountrySelected(filters, countryCode) {
+  return getCountrySet(filters).has(cleanCountryCode(countryCode));
+}
+
+function syncCountryFilterWithSelectedCountries() {
+  const countryFilter = document.getElementById("countryFilter");
+
+  if (!countryFilter) return;
+
+  if (selectedCountries.size === 1) {
+    const country = [...selectedCountries][0];
+    const hasOption = [...countryFilter.options].some(option => option.value === country);
+    countryFilter.value = hasOption ? country : "all";
+  } else {
+    countryFilter.value = "all";
+  }
+}
+
+function updateCountrySelection(countryCode, additive) {
+  const cleanCode = cleanCountryCode(countryCode);
+
+  if (!cleanCode) return;
+
+  if (additive) {
+    if (selectedCountries.has(cleanCode)) {
+      selectedCountries.delete(cleanCode);
+    } else {
+      selectedCountries.add(cleanCode);
+    }
+  } else {
+    if (selectedCountries.size === 1 && selectedCountries.has(cleanCode)) {
+      selectedCountries.clear();
+    } else {
+      selectedCountries.clear();
+      selectedCountries.add(cleanCode);
+    }
+  }
+
+  syncCountryFilterWithSelectedCountries();
+}
+
+function getCountrySelectionLabel(filters) {
+  const countries = filters.countries || [];
+
+  if (countries.length === 0) {
+    return "All countries";
+  }
+
+  if (countries.length === 1) {
+    return getDisplayCountry(countries[0]);
+  }
+
+  return `${countries.length} selected countries`;
 }
 
 /* -------------------------------------------------------
@@ -701,6 +831,16 @@ function drawMap() {
 
   projection.fitSize([mapWidth, mapHeight], geoData);
 
+  svg.append("rect")
+    .attr("class", "map-background-click")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("width", mapWidth)
+    .attr("height", mapHeight)
+    .attr("fill", "transparent")
+    .style("pointer-events", "all")
+    .on("click", clearCountrySelectionFromMap);
+
   svg.append("g")
     .attr("class", "countries")
     .selectAll("path")
@@ -718,6 +858,7 @@ function updateMap(filters) {
   if (!svg) return;
 
   const aggregatedByCountry = aggregateGenerationByCountry(generationData, filters);
+  const selectedSet = getCountrySet(filters);
 
   const values = [...aggregatedByCountry.values()]
     .map(row => row.selectedValue)
@@ -740,7 +881,7 @@ function updateMap(filters) {
         return "#d1d5db";
       }
 
-      if (filters.country !== "all" && filters.country !== code) {
+      if (selectedSet.size > 0 && !selectedSet.has(code)) {
         return "#e5e7eb";
       }
 
@@ -750,7 +891,7 @@ function updateMap(filters) {
   svg.selectAll(".country")
     .classed("selected", feature => {
       const code = getGeoCountryCode(feature);
-      return filters.country !== "all" && filters.country === code;
+      return selectedSet.has(code);
     })
     .each(function(feature) {
       const code = getGeoCountryCode(feature);
@@ -844,7 +985,8 @@ function onCountryHover(event, feature) {
       .style("opacity", 1)
       .html(`
         <strong>${name} (${code})</strong><br>
-        No data for selected filter.
+        No data for selected filter.<br><br>
+        <em>Tip: Shift + click to add or remove countries.</em>
       `)
       .style("left", `${event.pageX + 14}px`)
       .style("top", `${event.pageY + 14}px`);
@@ -864,7 +1006,8 @@ function onCountryHover(event, feature) {
       Energy selection: ${getReadableEnergySelection(filters.energySelection)}<br>
       Total value: ${formatNumber(row.valueGwh)} GWh<br>
       Selected metric: ${metricValue}<br>
-      Time range: ${filters.startLabel} – ${filters.endLabel}
+      Time range: ${filters.startLabel} – ${filters.endLabel}<br><br>
+      <em>Click to select. Shift + click to select multiple countries.</em>
     `)
     .style("left", `${event.pageX + 14}px`)
     .style("top", `${event.pageY + 14}px`);
@@ -875,6 +1018,8 @@ function hideTooltip() {
 }
 
 function onCountryClick(event, feature) {
+  event.stopPropagation();
+
   const code = getGeoCountryCode(feature);
   const countryFilter = document.getElementById("countryFilter");
 
@@ -884,14 +1029,7 @@ function onCountryClick(event, feature) {
 
   if (!hasOption) return;
 
-  if (countryFilter.value === code) {
-    countryFilter.value = "all";
-    selectedNetworkCountry = null;
-  } else {
-    countryFilter.value = code;
-    selectedNetworkCountry = code;
-  }
-
+  updateCountrySelection(code, event.shiftKey);
   updateDashboard();
 }
 
@@ -911,36 +1049,78 @@ function updatePowerFlowView(filters) {
 
   updateFlowNetworkMap(filters);
 
-  if (filters.country === "all") {
+  const result = aggregateFlowsForSelection(filters);
+
+  if (!hasCountrySelection(filters)) {
     flowSubtitle.textContent =
-      `${filters.startLabel} to ${filters.endLabel}. The network shows aggregated country-to-country electricity exchanges. Hover or click a country node for details.`;
-
-    totalImports.textContent = "-";
-    totalExports.textContent = "-";
-    netBalance.textContent = "-";
-
-    renderFlowList("topImportList", [], "Hover or select a country to inspect imports.");
-    renderFlowList("topExportList", [], "Hover or select a country to inspect exports.");
-    return;
+      `${filters.startLabel} to ${filters.endLabel}. Showing total European cross-border exchange.`;
+  } else {
+    flowSubtitle.textContent =
+      `${getCountrySelectionLabel(filters)}, ${filters.startLabel} to ${filters.endLabel}.`;
   }
-
-  const result = aggregateFlowsForCountry(filters);
-
-  flowSubtitle.textContent =
-    `${getDisplayCountry(filters.country)}, ${filters.startLabel} to ${filters.endLabel}.`;
 
   totalImports.textContent = `${formatNumber(result.totalImports)} GWh`;
   totalExports.textContent = `${formatNumber(result.totalExports)} GWh`;
-
-  const balance = result.totalExports - result.totalImports;
-  netBalance.textContent = `${formatSignedNumber(balance)} GWh`;
+  netBalance.textContent = `${formatSignedNumber(result.totalExports - result.totalImports)} GWh`;
 
   renderFlowList("topImportList", result.topImports, "No import data available.");
   renderFlowList("topExportList", result.topExports, "No export data available.");
 }
 
-function aggregateFlowsForCountry(filters) {
-  const selectedCountry = filters.country;
+function aggregateFlowsForSelection(filters) {
+  if (!hasCountrySelection(filters)) {
+    return aggregateGlobalFlowSummary(filters);
+  }
+
+  return aggregateFlowsForCountryGroup(filters);
+}
+
+function aggregateGlobalFlowSummary(filters) {
+  const countryStats = new Map();
+  let totalExchange = 0;
+
+  flowData.forEach(row => {
+    const timeMatch =
+      row.dateIndex >= filters.startIndex &&
+      row.dateIndex <= filters.endIndex;
+
+    if (!timeMatch) return;
+
+    const value = row.ValueInGWh;
+
+    if (!Number.isFinite(value) || value <= 0) return;
+    if (!row.FromCountry || !row.ToCountry) return;
+    if (row.FromCountry === row.ToCountry) return;
+
+    totalExchange += value;
+
+    ensureCountryFlowStats(countryStats, row.FromCountry);
+    ensureCountryFlowStats(countryStats, row.ToCountry);
+
+    countryStats.get(row.FromCountry).exports += value;
+    countryStats.get(row.ToCountry).imports += value;
+  });
+
+  const stats = [...countryStats.values()];
+
+  return {
+    totalImports: totalExchange,
+    totalExports: totalExchange,
+    topImports: stats
+      .map(item => ({ country: item.country, value: item.imports }))
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3),
+    topExports: stats
+      .map(item => ({ country: item.country, value: item.exports }))
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3)
+  };
+}
+
+function aggregateFlowsForCountryGroup(filters) {
+  const selectedSet = getCountrySet(filters);
 
   const importPartners = new Map();
   const exportPartners = new Map();
@@ -956,11 +1136,17 @@ function aggregateFlowsForCountry(filters) {
 
     if (!Number.isFinite(value) || value <= 0) return;
 
-    if (row.ToCountry === selectedCountry && row.FromCountry !== selectedCountry) {
+    const fromSelected = selectedSet.has(row.FromCountry);
+    const toSelected = selectedSet.has(row.ToCountry);
+
+    // Internal flows inside a multi-country selection are ignored for external balance.
+    if (fromSelected && toSelected) return;
+
+    if (toSelected && !fromSelected) {
       addToMap(importPartners, row.FromCountry, value);
     }
 
-    if (row.FromCountry === selectedCountry && row.ToCountry !== selectedCountry) {
+    if (fromSelected && !toSelected) {
       addToMap(exportPartners, row.ToCountry, value);
     }
   });
@@ -969,13 +1155,21 @@ function aggregateFlowsForCountry(filters) {
   const exports = mapToSortedPartnerArray(exportPartners);
 
   return {
-    imports,
-    exports,
-    topImports: imports.slice(0, 3),
-    topExports: exports.slice(0, 3),
     totalImports: imports.reduce((sum, item) => sum + item.value, 0),
-    totalExports: exports.reduce((sum, item) => sum + item.value, 0)
+    totalExports: exports.reduce((sum, item) => sum + item.value, 0),
+    topImports: imports.slice(0, 3),
+    topExports: exports.slice(0, 3)
   };
+}
+
+function ensureCountryFlowStats(map, country) {
+  if (!map.has(country)) {
+    map.set(country, {
+      country,
+      imports: 0,
+      exports: 0
+    });
+  }
 }
 
 function addToMap(map, key, value) {
@@ -1056,72 +1250,101 @@ function drawNetworkLegend() {
 
   legend.selectAll("*").remove();
 
-  const x = 20;
-  const y = 24;
+  const x = 18;
+  const y = 22;
 
   legend.append("text")
     .attr("class", "network-legend-title")
     .attr("x", x)
     .attr("y", y)
-    .text("Interaction guide");
+    .text("Network guide");
+
+  const roleY = y + 24;
 
   legend.append("circle")
-    .attr("cx", x + 8)
-    .attr("cy", y + 24)
-    .attr("r", 6)
+    .attr("cx", x + 7)
+    .attr("cy", roleY)
+    .attr("r", 5.5)
     .attr("fill", "#ffffff")
     .attr("stroke", "#3B82F6")
-    .attr("stroke-width", 2.5);
+    .attr("stroke-width", 2.4);
 
   legend.append("text")
-    .attr("x", x + 24)
-    .attr("y", y + 28)
+    .attr("x", x + 22)
+    .attr("y", roleY + 4)
     .text("Net importer");
 
   legend.append("circle")
-    .attr("cx", x + 8)
-    .attr("cy", y + 46)
-    .attr("r", 6)
+    .attr("cx", x + 7)
+    .attr("cy", roleY + 20)
+    .attr("r", 5.5)
     .attr("fill", "#ffffff")
     .attr("stroke", "#D96C50")
-    .attr("stroke-width", 2.5);
+    .attr("stroke-width", 2.4);
 
   legend.append("text")
-    .attr("x", x + 24)
-    .attr("y", y + 50)
+    .attr("x", x + 22)
+    .attr("y", roleY + 24)
     .text("Net exporter");
+
+  legend.append("circle")
+    .attr("cx", x + 7)
+    .attr("cy", roleY + 40)
+    .attr("r", 5.5)
+    .attr("fill", "#ffffff")
+    .attr("stroke", "#1F3A5F")
+    .attr("stroke-width", 2.4);
+
+  legend.append("text")
+    .attr("x", x + 22)
+    .attr("y", roleY + 44)
+    .text("Balanced role");
 
   legend.append("line")
     .attr("x1", x)
     .attr("x2", x + 18)
-    .attr("y1", y + 70)
-    .attr("y2", y + 70)
+    .attr("y1", roleY + 64)
+    .attr("y2", roleY + 64)
     .attr("stroke", "#3B82F6")
     .attr("stroke-width", 4);
 
   legend.append("text")
-    .attr("x", x + 24)
-    .attr("y", y + 74)
-    .text("Focused country imports");
+    .attr("x", x + 22)
+    .attr("y", roleY + 68)
+    .text("Focused imports");
 
   legend.append("line")
     .attr("x1", x)
     .attr("x2", x + 18)
-    .attr("y1", y + 92)
-    .attr("y2", y + 92)
+    .attr("y1", roleY + 84)
+    .attr("y2", roleY + 84)
     .attr("stroke", "#D96C50")
     .attr("stroke-width", 4);
 
   legend.append("text")
-    .attr("x", x + 24)
-    .attr("y", y + 96)
-    .text("Focused country exports");
+    .attr("x", x + 22)
+    .attr("y", roleY + 88)
+    .text("Focused exports");
+
+  legend.append("line")
+    .attr("x1", x)
+    .attr("x2", x + 18)
+    .attr("y1", roleY + 104)
+    .attr("y2", roleY + 104)
+    .attr("stroke", "#1F3A5F")
+    .attr("stroke-width", 4);
+
+  legend.append("text")
+    .attr("x", x + 22)
+    .attr("y", roleY + 108)
+    .text("Balanced partners");
 
   legend.append("text")
     .attr("x", x)
-    .attr("y", y + 120)
-    .text("Click empty space to reset.");
+    .attr("y", roleY + 132)
+    .text("Hover = inspect. Click = lock. Shift + click = add.");
 }
+
 
 function updateFlowNetworkMap(filters) {
   if (!flowSvg) return;
@@ -1135,11 +1358,6 @@ function updateFlowNetworkMap(filters) {
   linksLayer.selectAll("*").remove();
   nodesLayer.selectAll("*").remove();
   labelsLayer.selectAll("*").remove();
-
-  selectedNetworkCountry =
-    filters.country !== "all"
-      ? filters.country
-      : null;
 
   const networkData = buildFlowNetworkData(filters);
   lastNetworkData = networkData;
@@ -1156,7 +1374,7 @@ function updateFlowNetworkMap(filters) {
 
   if (subtitle) {
     subtitle.textContent =
-      `${filters.startLabel} to ${filters.endLabel}. Shared arches show aggregated exchange between two countries. Hover or click a node for import/export details.`;
+      `${filters.startLabel} to ${filters.endLabel}. Hover or click a node to simplify the network into imports and exports.`;
   }
 
   const maxLinkValue = d3.max(links, d => d.value) || 1;
@@ -1164,19 +1382,19 @@ function updateFlowNetworkMap(filters) {
 
   const linkWidthScale = d3.scaleSqrt()
     .domain([0, maxLinkValue])
-    .range([0.35, 5.5]);
+    .range([0.55, 6.2]);
 
   const linkOpacityScale = d3.scaleSqrt()
     .domain([0, maxLinkValue])
-    .range([0.035, 0.34]);
+    .range([0.07, 0.48]);
 
   const nodeRadiusScale = d3.scaleSqrt()
     .domain([0, maxNodeValue])
-    .range([6, 24]);
+    .range([6.5, 25]);
 
   nodes.forEach((node, index) => {
     node.baseRadius = nodeRadiusScale(node.totalFlow);
-    node.isImportant = index < 22;
+    node.isImportant = index < 32;
     node.balance = node.exports - node.imports;
     node.balanceRatio =
       node.totalFlow > 0
@@ -1184,7 +1402,7 @@ function updateFlowNetworkMap(filters) {
         : 0;
   });
 
-  const backboneCount = Math.max(18, Math.round(links.length * 0.18));
+  const backboneCount = Math.max(22, Math.round(links.length * 0.22));
   const backboneIds = new Set(
     links
       .slice(0, backboneCount)
@@ -1228,7 +1446,7 @@ function updateFlowNetworkMap(filters) {
     .attr("cy", d => d.y)
     .attr("r", d => d.baseRadius)
     .on("mouseenter", function(event, d) {
-      focusNetworkNode(d.id);
+      focusNetworkCountries([d.id]);
       showNetworkNodeTooltip(event, d.id);
     })
     .on("mousemove", function(event, d) {
@@ -1240,7 +1458,7 @@ function updateFlowNetworkMap(filters) {
     })
     .on("click", function(event, d) {
       event.stopPropagation();
-      setCountryFilterFromNetworkNode(d.id);
+      setCountryFilterFromNetworkNode(d.id, event.shiftKey);
     });
 
   labelsLayer.selectAll("text")
@@ -1257,6 +1475,7 @@ function updateFlowNetworkMap(filters) {
 
   restoreSelectedNetworkFocus();
 }
+
 
 function buildFlowNetworkData(filters) {
   const nodeMap = new Map();
@@ -1378,8 +1597,8 @@ function prepareNetworkLayout(nodes, links) {
     networkAnchorProjection = d3.geoMercator()
       .fitExtent(
         [
-          [85, 70],
-          [flowMapWidth - 70, flowMapHeight - 55]
+          [95, 62],
+          [flowMapWidth - 70, flowMapHeight - 54]
         ],
         geoData
       );
@@ -1387,7 +1606,7 @@ function prepareNetworkLayout(nodes, links) {
     networkAnchorPath = d3.geoPath().projection(networkAnchorProjection);
   }
 
-  const fallbackRadius = Math.min(flowMapWidth, flowMapHeight) * 0.32;
+  const fallbackRadius = Math.min(flowMapWidth, flowMapHeight) * 0.34;
 
   nodes.forEach((node, index) => {
     const anchorPoint = getNetworkAnchorPoint(node.id);
@@ -1415,21 +1634,65 @@ function prepareNetworkLayout(nodes, links) {
         .id(d => d.id)
         .distance(d => {
           const strength = Math.sqrt(d.value / maxLinkValue);
-          return 140 - strength * 55;
+          return 160 - strength * 48;
         })
-        .strength(0.038)
+        .strength(0.032)
     )
-    .force("charge", d3.forceManyBody().strength(-115))
-    .force("collision", d3.forceCollide().radius(d => d.baseRadius + 10))
-    .force("x", d3.forceX(d => d.anchorX).strength(0.26))
-    .force("y", d3.forceY(d => d.anchorY).strength(0.26))
+    .force("charge", d3.forceManyBody().strength(-165))
+    .force("collision", d3.forceCollide().radius(d => d.baseRadius + 15))
+    .force("x", d3.forceX(d => d.anchorX).strength(0.23))
+    .force("y", d3.forceY(d => d.anchorY).strength(0.23))
     .force("center", d3.forceCenter(centerX, centerY))
     .stop();
 
-  for (let i = 0; i < 250; i++) {
+  for (let i = 0; i < 280; i++) {
     simulation.tick();
   }
+
+  fitNetworkLayoutToViewport(nodes);
 }
+
+function fitNetworkLayoutToViewport(nodes) {
+  if (!nodes.length) return;
+
+  const padding = 34;
+  const legendSafeLeft = 138;
+  const targetMinX = legendSafeLeft;
+  const targetMaxX = flowMapWidth - padding;
+  const targetMinY = 42;
+  const targetMaxY = flowMapHeight - 40;
+
+  const minX = d3.min(nodes, d => d.x) || 0;
+  const maxX = d3.max(nodes, d => d.x) || flowMapWidth;
+  const minY = d3.min(nodes, d => d.y) || 0;
+  const maxY = d3.max(nodes, d => d.y) || flowMapHeight;
+
+  const currentWidth = Math.max(1, maxX - minX);
+  const currentHeight = Math.max(1, maxY - minY);
+
+  const targetWidth = targetMaxX - targetMinX;
+  const targetHeight = targetMaxY - targetMinY;
+
+  const scale = Math.min(
+    1.18,
+    targetWidth / currentWidth,
+    targetHeight / currentHeight
+  );
+
+  const currentCenterX = (minX + maxX) / 2;
+  const currentCenterY = (minY + maxY) / 2;
+  const targetCenterX = (targetMinX + targetMaxX) / 2;
+  const targetCenterY = (targetMinY + targetMaxY) / 2 + 8;
+
+  nodes.forEach(node => {
+    node.x = targetCenterX + (node.x - currentCenterX) * scale;
+    node.y = targetCenterY + (node.y - currentCenterY) * scale;
+
+    node.x = Math.max(padding, Math.min(flowMapWidth - padding, node.x));
+    node.y = Math.max(padding, Math.min(flowMapHeight - padding, node.y));
+  });
+}
+
 
 function getNetworkAnchorPoint(countryCode) {
   if (!geoData || !geoData.features || !networkAnchorPath) {
@@ -1487,43 +1750,44 @@ function createNetworkLinkPath(link) {
 }
 
 function focusNetworkNode(countryCode) {
+  focusNetworkCountries([countryCode]);
+}
+
+function focusNetworkCountries(countryCodes) {
   if (!lastNetworkData || !flowSvg) return;
 
   resetNetworkStyles();
 
-  const cleanCode = cleanCountryCode(countryCode);
-  const connectedCountries = new Set([cleanCode]);
+  const selectedSet = new Set(countryCodes.map(code => cleanCountryCode(code)));
+  const connectedCountries = new Set(selectedSet);
 
   lastNetworkData.links.forEach(link => {
-    if (link.countryA === cleanCode) {
-      connectedCountries.add(link.countryB);
-    }
-
-    if (link.countryB === cleanCode) {
+    if (selectedSet.has(link.countryA) || selectedSet.has(link.countryB)) {
       connectedCountries.add(link.countryA);
+      connectedCountries.add(link.countryB);
     }
   });
 
   flowSvg.selectAll(".network-link")
     .classed("dimmed", d => {
-      return d.countryA !== cleanCode && d.countryB !== cleanCode;
+      return !selectedSet.has(d.countryA) && !selectedSet.has(d.countryB);
     })
     .classed("incoming-highlight", d => {
-      const relation = getPairRelationForCountry(d, cleanCode);
+      const relation = getPairRelationForCountrySet(d, selectedSet);
       return relation === "incoming";
     })
     .classed("outgoing-highlight", d => {
-      const relation = getPairRelationForCountry(d, cleanCode);
+      const relation = getPairRelationForCountrySet(d, selectedSet);
       return relation === "outgoing";
     })
     .classed("bidirectional-highlight", d => {
-      const relation = getPairRelationForCountry(d, cleanCode);
+      const relation = getPairRelationForCountrySet(d, selectedSet);
       return relation === "balanced";
     })
     .attr("stroke-width", function(d) {
       const baseWidth = Number(d3.select(this).attr("data-base-width")) || 1;
 
-      if (d.countryA === cleanCode || d.countryB === cleanCode) {
+      if (selectedSet.has(d.countryA) || selectedSet.has(d.countryB)) {
         return baseWidth + 2;
       }
 
@@ -1531,15 +1795,15 @@ function focusNetworkNode(countryCode) {
     });
 
   flowSvg.selectAll(".network-link")
-    .filter(d => d.countryA === cleanCode || d.countryB === cleanCode)
+    .filter(d => selectedSet.has(d.countryA) || selectedSet.has(d.countryB))
     .raise();
 
   flowSvg.selectAll(".network-node")
     .classed("dimmed", d => !connectedCountries.has(d.id))
-    .classed("hovered", d => d.id === cleanCode)
-    .classed("neighbor", d => d.id !== cleanCode && connectedCountries.has(d.id))
+    .classed("hovered", d => selectedSet.has(d.id))
+    .classed("neighbor", d => !selectedSet.has(d.id) && connectedCountries.has(d.id))
     .attr("r", d => {
-      if (d.id === cleanCode) {
+      if (selectedSet.has(d.id)) {
         return d.baseRadius + 8;
       }
 
@@ -1555,28 +1819,33 @@ function focusNetworkNode(countryCode) {
     .classed("highlighted", d => connectedCountries.has(d.id));
 }
 
-function getPairRelationForCountry(link, countryCode) {
-  const cleanCode = cleanCountryCode(countryCode);
+function getPairRelationForCountrySet(link, countrySet) {
+  const aSelected = countrySet.has(link.countryA);
+  const bSelected = countrySet.has(link.countryB);
 
-  if (link.countryA !== cleanCode && link.countryB !== cleanCode) {
+  if (!aSelected && !bSelected) {
     return "none";
   }
 
-  let importsToCountry = 0;
-  let exportsFromCountry = 0;
-
-  if (cleanCode === link.countryA) {
-    exportsFromCountry = link.valueAB;
-    importsToCountry = link.valueBA;
+  if (aSelected && bSelected) {
+    return "balanced";
   }
 
-  if (cleanCode === link.countryB) {
-    exportsFromCountry = link.valueBA;
-    importsToCountry = link.valueAB;
+  let importsToSelection = 0;
+  let exportsFromSelection = 0;
+
+  if (aSelected) {
+    exportsFromSelection += link.valueAB;
+    importsToSelection += link.valueBA;
   }
 
-  const difference = exportsFromCountry - importsToCountry;
-  const total = exportsFromCountry + importsToCountry;
+  if (bSelected) {
+    exportsFromSelection += link.valueBA;
+    importsToSelection += link.valueAB;
+  }
+
+  const difference = exportsFromSelection - importsToSelection;
+  const total = exportsFromSelection + importsToSelection;
 
   if (total <= 0) {
     return "none";
@@ -1595,16 +1864,16 @@ function getPairRelationForCountry(link, countryCode) {
   return "balanced";
 }
 
-function clearNetworkFocus() {
-  resetNetworkStyles();
-}
-
 function restoreSelectedNetworkFocus() {
-  if (selectedNetworkCountry) {
-    focusNetworkNode(selectedNetworkCountry);
+  if (selectedCountries.size > 0) {
+    focusNetworkCountries([...selectedCountries]);
   } else {
     clearNetworkFocus();
   }
+}
+
+function clearNetworkFocus() {
+  resetNetworkStyles();
 }
 
 function resetNetworkStyles() {
@@ -1640,20 +1909,20 @@ function showNetworkNodeTooltip(event, countryCode) {
 
   if (!node) return;
 
-  const incoming = getTopNetworkLinks(countryCode, "incoming", 5);
-  const outgoing = getTopNetworkLinks(countryCode, "outgoing", 5);
+  const incoming = getTopNetworkLinks(countryCode, "incoming", 3);
+  const outgoing = getTopNetworkLinks(countryCode, "outgoing", 3);
 
   const incomingHtml = incoming.length
     ? incoming.map(link => {
-        return `${getDisplayCountry(link.sourceCode)}: ${formatNumber(link.value)} GWh`;
-      }).join("<br>")
-    : "No imports";
+        return `<li><span>${getShortCountryLabel(link.sourceCode)}</span><strong>${formatNumber(link.value)} GWh</strong></li>`;
+      }).join("")
+    : "<li><span>No imports</span></li>";
 
   const outgoingHtml = outgoing.length
     ? outgoing.map(link => {
-        return `${getDisplayCountry(link.targetCode)}: ${formatNumber(link.value)} GWh`;
-      }).join("<br>")
-    : "No exports";
+        return `<li><span>${getShortCountryLabel(link.targetCode)}</span><strong>${formatNumber(link.value)} GWh</strong></li>`;
+      }).join("")
+    : "<li><span>No exports</span></li>";
 
   const balance = node.exports - node.imports;
 
@@ -1667,35 +1936,48 @@ function showNetworkNodeTooltip(event, countryCode) {
   d3.select("#tooltip")
     .style("opacity", 1)
     .html(`
-      <strong>${getDisplayCountry(countryCode)}</strong><br>
-      Role: ${role}<br>
-      Total imports: ${formatNumber(node.imports)} GWh<br>
-      Total exports: ${formatNumber(node.exports)} GWh<br>
-      Net balance: ${formatSignedNumber(balance)} GWh<br><br>
-      <strong>Top incoming links</strong><br>
-      ${incomingHtml}<br><br>
-      <strong>Top outgoing links</strong><br>
-      ${outgoingHtml}<br><br>
-      <em>Click to lock this country. Click empty space to reset.</em>
+      <strong>${getDisplayCountry(countryCode)}</strong>
+      <div class="tooltip-muted">${role}</div>
+
+      <div class="tooltip-stat-grid">
+        <div><span>Imports</span><strong>${formatNumber(node.imports)} GWh</strong></div>
+        <div><span>Exports</span><strong>${formatNumber(node.exports)} GWh</strong></div>
+        <div><span>Balance</span><strong>${formatSignedNumber(balance)} GWh</strong></div>
+      </div>
+
+      <div class="tooltip-two-columns">
+        <div>
+          <strong>Top imports</strong>
+          <ul>${incomingHtml}</ul>
+        </div>
+        <div>
+          <strong>Top exports</strong>
+          <ul>${outgoingHtml}</ul>
+        </div>
+      </div>
+
+      <div class="tooltip-muted">Click to lock. Shift + click to add. Empty click resets.</div>
     `)
     .style("left", `${event.pageX + 14}px`)
     .style("top", `${event.pageY + 14}px`);
 }
 
+
 function showNetworkLinkTooltip(event, link) {
   d3.select("#tooltip")
     .style("opacity", 1)
     .html(`
-      <strong>Electricity exchange</strong><br>
-      ${getDisplayCountry(link.countryA)} → ${getDisplayCountry(link.countryB)}:
-      ${formatNumber(link.valueAB)} GWh<br>
-      ${getDisplayCountry(link.countryB)} → ${getDisplayCountry(link.countryA)}:
-      ${formatNumber(link.valueBA)} GWh<br>
-      Total exchange: ${formatNumber(link.value)} GWh
+      <strong>Electricity exchange</strong>
+      <div class="tooltip-stat-grid two">
+        <div><span>${getShortCountryLabel(link.countryA)} → ${getShortCountryLabel(link.countryB)}</span><strong>${formatNumber(link.valueAB)} GWh</strong></div>
+        <div><span>${getShortCountryLabel(link.countryB)} → ${getShortCountryLabel(link.countryA)}</span><strong>${formatNumber(link.valueBA)} GWh</strong></div>
+      </div>
+      <div class="tooltip-muted">Total exchange: ${formatNumber(link.value)} GWh</div>
     `)
     .style("left", `${event.pageX + 14}px`)
     .style("top", `${event.pageY + 14}px`);
 }
+
 
 function getTopNetworkLinks(countryCode, direction, limit) {
   if (!lastNetworkData) return [];
@@ -1752,7 +2034,7 @@ function getTopNetworkLinks(countryCode, direction, limit) {
     .slice(0, limit);
 }
 
-function setCountryFilterFromNetworkNode(countryCode) {
+function setCountryFilterFromNetworkNode(countryCode, additive) {
   const countryFilter = document.getElementById("countryFilter");
 
   if (!countryFilter) return;
@@ -1765,21 +2047,20 @@ function setCountryFilterFromNetworkNode(countryCode) {
 
   if (!hasOption) return;
 
-  selectedNetworkCountry = cleanCode;
-  countryFilter.value = cleanCode;
+  updateCountrySelection(cleanCode, additive);
+  updateDashboard();
+}
 
+function clearCountrySelectionFromMap() {
+  selectedCountries.clear();
+  syncCountryFilterWithSelectedCountries();
+  hideTooltip();
   updateDashboard();
 }
 
 function clearCountrySelectionFromNetwork() {
-  const countryFilter = document.getElementById("countryFilter");
-
-  selectedNetworkCountry = null;
-
-  if (countryFilter) {
-    countryFilter.value = "all";
-  }
-
+  selectedCountries.clear();
+  syncCountryFilterWithSelectedCountries();
   updateDashboard();
 }
 
@@ -1794,13 +2075,15 @@ function updateDashboard() {
   updateMap(filters);
   updateTitles(filters);
   updatePowerFlowView(filters);
+  updateSidebarInfoPanel(filters);
 }
 
 function updateKpis(filters) {
   const aggregatedByCountry = aggregateGenerationByCountry(generationData, filters);
+  const selectedSet = getCountrySet(filters);
 
   const visibleEntries = [...aggregatedByCountry.values()].filter(entry => {
-    return filters.country === "all" || entry.country === filters.country;
+    return selectedSet.size === 0 || selectedSet.has(entry.country);
   });
 
   const totalGWh = visibleEntries.reduce((sum, entry) => {
@@ -1811,10 +2094,7 @@ function updateKpis(filters) {
     return entry.valueGwh > 0;
   }).length;
 
-  const shareValue =
-    filters.country === "all"
-      ? average(visibleEntries.map(entry => entry.selectedValue))
-      : visibleEntries[0]?.selectedValue || 0;
+  const shareValue = average(visibleEntries.map(entry => entry.selectedValue));
 
   const selectedTotal = document.getElementById("selectedTotal");
   const countriesWithData = document.getElementById("countriesWithData");
@@ -1844,6 +2124,7 @@ function updateKpis(filters) {
 
 function updateTitles(filters) {
   const readableEnergy = getReadableEnergySelection(filters.energySelection);
+  const countryContext = getCountrySelectionLabel(filters);
 
   const mapTitle = document.getElementById("mapTitle");
   const mapSubtitle = document.getElementById("mapSubtitle");
@@ -1858,9 +2139,84 @@ function updateTitles(filters) {
         filters.metric === "ValueInGWh"
           ? "absolute generation in GWh"
           : "average relative share in %"
-      }.`;
+      }. Country filter: ${countryContext}.`;
   }
 }
+
+function updateSidebarInfoPanel(filters) {
+  const infoPanel = document.querySelector(".sidebar .panel:last-child");
+
+  if (!infoPanel) return;
+
+  const containsInputs = infoPanel.querySelector("select, input, button, .timeline-filter, #resetFilters");
+
+  if (containsInputs) return;
+
+  const countryLabel = getCountrySelectionLabel(filters);
+  const energyLabel = getReadableEnergySelection(filters.energySelection);
+  const metricLabel = filters.metric === "ValueInGWh"
+    ? "GWh"
+    : "% share";
+
+  infoPanel.innerHTML = `
+    <div class="filter-info-current">
+      <span>${filters.startLabel} – ${filters.endLabel}</span>
+      <strong>${countryLabel}</strong>
+      <small>${energyLabel}, ${metricLabel}</small>
+    </div>
+
+    <div class="filter-tip-card">
+      <span class="filter-tip-kicker">Interaction tip</span>
+      <p id="rotatingFilterTip"></p>
+      <div id="filterTipDots" class="filter-tip-dots"></div>
+    </div>
+  `;
+
+  updateSidebarTipText();
+  startSidebarTipRotation();
+}
+
+function getSidebarTips() {
+  return [
+    "Hover a country node to fade unrelated links and inspect only its direct exchange partners.",
+    "Click a country to lock the focus. Click the empty background to return to all countries.",
+    "Use Shift + Click on the map or network nodes to compare multiple countries as one group.",
+    "In the flow network, blue highlights mean imports or orange highlights mean exports from a country.",
+    "Node outlines show the role of a country: blue (net importer), orange (net exporter) or balanced.",
+    "Use GWh for absolute generation values and % for average monthly shares in the generation map.",
+    "With multiple selected countries, internal flows inside selection are ignored for import/export balance."
+  ];
+}
+
+function updateSidebarTipText() {
+  const tipElement = document.getElementById("rotatingFilterTip");
+  const dotsElement = document.getElementById("filterTipDots");
+
+  if (!tipElement || !dotsElement) return;
+
+  const tips = getSidebarTips();
+  const safeIndex = sidebarTipIndex % tips.length;
+
+  tipElement.textContent = tips[safeIndex];
+
+  dotsElement.innerHTML = "";
+
+  tips.forEach((tip, index) => {
+    const dot = document.createElement("span");
+    dot.className = index === safeIndex ? "active" : "";
+    dotsElement.appendChild(dot);
+  });
+}
+
+function startSidebarTipRotation() {
+  if (sidebarTipTimer) return;
+
+  sidebarTipTimer = window.setInterval(() => {
+    sidebarTipIndex = (sidebarTipIndex + 1) % getSidebarTips().length;
+    updateSidebarTipText();
+  }, 6500);
+}
+
 
 /* -------------------------------------------------------
    GEO HELPERS
@@ -1910,6 +2266,11 @@ function getDisplayCountry(code) {
   }
 
   return `${name} (${cleanCode})`;
+}
+
+
+function getShortCountryLabel(code) {
+  return cleanCountryCode(code);
 }
 
 /* -------------------------------------------------------
@@ -2002,12 +2363,18 @@ function showError(message) {
   const countriesWithData = document.getElementById("countriesWithData");
   const selectedSource = document.getElementById("selectedSource");
   const selectedMetricElement = document.getElementById("selectedMetric");
+  const totalImports = document.getElementById("totalImports");
+  const totalExports = document.getElementById("totalExports");
+  const netBalance = document.getElementById("netBalance");
   const map = document.getElementById("map");
 
   if (selectedTotal) selectedTotal.textContent = "Error";
   if (countriesWithData) countriesWithData.textContent = "-";
   if (selectedSource) selectedSource.textContent = "-";
   if (selectedMetricElement) selectedMetricElement.textContent = "-";
+  if (totalImports) totalImports.textContent = "-";
+  if (totalExports) totalExports.textContent = "-";
+  if (netBalance) netBalance.textContent = "-";
 
   if (map) {
     map.innerHTML = `
