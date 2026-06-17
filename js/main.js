@@ -180,51 +180,71 @@ function normalizeFlowData(rawData) {
     const month = toNumber(pickValue(row, ["Month", "month"]));
     const year = toNumber(pickValue(row, ["Year", "year"]));
 
+    const rawFromCountry = cleanCountryCode(
+      pickValue(row, [
+        "FromCountry",
+        "from_country",
+        "From Country",
+        "from country",
+        "FromCountryMapCode",
+        "From Country Map Code"
+      ])
+    );
+
+    const rawToCountry = cleanCountryCode(
+      pickValue(row, [
+        "ToCountry",
+        "to_country",
+        "To Country",
+        "to country",
+        "ToCountryMapCode",
+        "To Country Map Code"
+      ])
+    );
+
+    const flowDirection = cleanText(
+      pickValue(row, [
+        "FlowDirection",
+        "flow_direction",
+        "Direction",
+        "direction"
+      ])
+    );
+
+    const value = toNumber(
+      pickValue(row, [
+        "ValueInGWh",
+        "value_gwh",
+        "Value in GWh",
+        "Provided Value in GWh",
+        "provided value in gwh"
+      ])
+    );
+
+    const physicalDirection = getPhysicalFlowDirection(
+      rawFromCountry,
+      rawToCountry,
+      flowDirection
+    );
+
     return {
       Month: month,
       Year: year,
       dateIndex: year * 12 + month,
 
-      FromCountry: cleanCountryCode(
-        pickValue(row, [
-          "FromCountry",
-          "from_country",
-          "From Country",
-          "from country",
-          "FromCountryMapCode",
-          "From Country Map Code"
-        ])
-      ),
+      // Original cleaned values from the file
+      OriginalFromCountry: rawFromCountry,
+      OriginalToCountry: rawToCountry,
 
-      ToCountry: cleanCountryCode(
-        pickValue(row, [
-          "ToCountry",
-          "to_country",
-          "To Country",
-          "to country",
-          "ToCountryMapCode",
-          "To Country Map Code"
-        ])
-      ),
+      // Important:
+      // These are now the physical electricity flow directions.
+      // FromCountry = physical source
+      // ToCountry = physical target
+      FromCountry: physicalDirection.from,
+      ToCountry: physicalDirection.to,
 
-      FlowDirection: cleanText(
-        pickValue(row, [
-          "FlowDirection",
-          "flow_direction",
-          "Direction",
-          "direction"
-        ])
-      ),
-
-      ValueInGWh: toNumber(
-        pickValue(row, [
-          "ValueInGWh",
-          "value_gwh",
-          "Value in GWh",
-          "Provided Value in GWh",
-          "provided value in gwh"
-        ])
-      )
+      FlowDirection: flowDirection,
+      ValueInGWh: value
     };
   }).filter(row =>
     Number.isFinite(row.Year) &&
@@ -234,6 +254,29 @@ function normalizeFlowData(rawData) {
     row.FromCountry &&
     row.ToCountry
   );
+}
+
+function getPhysicalFlowDirection(fromCountry, toCountry, flowDirection) {
+  const direction = cleanText(flowDirection).toLowerCase();
+
+  if (direction.includes("import")) {
+    return {
+      from: toCountry,
+      to: fromCountry
+    };
+  }
+
+  if (direction.includes("export")) {
+    return {
+      from: fromCountry,
+      to: toCountry
+    };
+  }
+
+  return {
+    from: fromCountry,
+    to: toCountry
+  };
 }
 
 function deduplicateEnergyRows(rows) {
@@ -287,24 +330,42 @@ function deduplicateFlowRows(rows) {
   let duplicateCount = 0;
 
   rows.forEach(row => {
+    if (
+      !Number.isFinite(row.Year) ||
+      !Number.isFinite(row.Month) ||
+      row.Month < 1 ||
+      row.Month > 12 ||
+      !row.FromCountry ||
+      !row.ToCountry ||
+      row.FromCountry === row.ToCountry
+    ) {
+      return;
+    }
+
     const key = [
-      row.FromCountry,
-      row.ToCountry,
       row.Year,
       row.Month,
-      row.FlowDirection,
-      row.ValueInGWh
+      row.FromCountry,
+      row.ToCountry
     ].join("|");
 
     if (!seen.has(key)) {
       seen.set(key, row);
     } else {
       duplicateCount += 1;
+
+      const existing = seen.get(key);
+
+      if (row.ValueInGWh > existing.ValueInGWh) {
+        seen.set(key, row);
+      }
     }
   });
 
   if (duplicateCount > 0) {
-    console.warn(`Removed ${duplicateCount} exact duplicate flow rows.`);
+    console.warn(
+      `Removed ${duplicateCount} duplicate or mirrored physical flow rows.`
+    );
   }
 
   return [...seen.values()];
