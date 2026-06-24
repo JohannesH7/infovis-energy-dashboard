@@ -14,28 +14,93 @@
 
 <body>
   <header class="top-nav">
-    <div class="brand">EU Energy</div>
+    <div class="top-nav-inner">
+      <div class="brand-lockup">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M13 2 4 13h6l-1 9 10-13h-6l0-7Z" />
+          </svg>
+        </div>
 
-    <nav class="nav-links">
-      <button class="nav-btn active">Overview</button>
-      <button class="nav-btn">Generation</button>
-      <button class="nav-btn">Flows</button>
-      <button class="nav-btn">Compare Countries</button>
-    </nav>
+        <div>
+          <div class="brand">EU Energy Dashboard</div>
+          <div class="brand-subtitle">Generation &amp; cross-border power flows</div>
+        </div>
+      </div>
+
+      <div class="header-network-motif" aria-hidden="true">
+        <svg viewBox="0 0 170 42" focusable="false">
+          <path d="M6 28 C24 9, 42 31, 60 18 S96 7, 113 24 S144 36, 163 12" />
+          <path d="M46 25 L76 28 L111 17 L146 25" />
+          <circle cx="6" cy="28" r="3" />
+          <circle cx="24" cy="10" r="3" />
+          <circle cx="46" cy="25" r="3" />
+          <circle cx="76" cy="28" r="4" />
+          <circle cx="111" cy="17" r="3" />
+          <circle cx="146" cy="25" r="3" />
+          <circle cx="163" cy="12" r="3" />
+        </svg>
+      </div>
+
+      <div class="overview-badge" aria-label="Current view">
+        <span class="overview-dot"></span>
+        <span>Overview</span>
+      </div>
+    </div>
   </header>
 
   <main class="page">
-    <section class="intro">
-      <h1>Electricity Generation and Power Flows in Europe</h1>
+    <section class="intro compact-intro" aria-label="Dashboard context">
       <p>
-        Explore electricity generation across European countries by year, month,
-        energy source, absolute values and relative shares.
+        Explore electricity generation, energy-source shares and cross-border power flows across Europe.
       </p>
+
+      <div class="scope-chips" aria-label="Dashboard scope">
+        <span class="scope-chip">2016–2025</span>
+        <span class="scope-chip">monthly data</span>
+        <span class="scope-chip">generation + flows</span>
+      </div>
     </section>
 
     <section class="dashboard">
       <aside class="sidebar">
-        <section class="panel">
+        <section class="view-switch-card" aria-label="Visualization switch">
+          <div class="view-switch-copy">
+            <span class="view-switch-kicker">Analysis mode</span>
+            <strong id="activeViewTitle">Generation map</strong>
+            <small id="activeViewDescription">Inspect electricity generation by country, source and metric.</small>
+          </div>
+
+          <div class="view-switch" role="tablist" aria-label="Switch between visualizations">
+            <button
+              id="generationViewTab"
+              class="view-tab active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="generationView"
+              data-view="generation"
+            >
+              <span class="view-tab-icon map-icon" aria-hidden="true"></span>
+              <span>Generation</span>
+            </button>
+
+            <button
+              id="flowsViewTab"
+              class="view-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="flowsView"
+              data-view="flows"
+            >
+              <span class="view-tab-icon network-icon" aria-hidden="true"></span>
+              <span>Power flows</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel filter-panel">
           <h2>Filters</h2>
 
           <div class="timeline-filter">
@@ -95,93 +160,116 @@
       </aside>
 
       <section class="content">
-        <section class="kpi-grid">
-          <article class="kpi-card renewable">
-            <span>Selected Total</span>
-            <strong id="selectedTotal">Loading...</strong>
-          </article>
+        <section
+          id="generationView"
+          class="view-panel active"
+          role="tabpanel"
+          aria-labelledby="generationViewTab"
+          data-view-panel="generation"
+        >
+          <section class="kpi-grid">
+            <article class="kpi-card renewable">
+              <span>Selected Total</span>
+              <strong id="selectedTotal">Loading...</strong>
+            </article>
 
-          <article class="kpi-card blue">
-            <span>Countries with Data</span>
-            <strong id="countriesWithData">Loading...</strong>
-          </article>
+            <article class="kpi-card blue">
+              <span>Countries with Data</span>
+              <strong id="countriesWithData">Loading...</strong>
+            </article>
 
-          <article class="kpi-card grey">
-            <span>Selected Source</span>
-            <strong id="selectedSource">Loading...</strong>
-          </article>
+            <article class="kpi-card grey">
+              <span>Selected Source</span>
+              <strong id="selectedSource">Loading...</strong>
+            </article>
 
-          <article class="kpi-card orange">
-            <span>Selected Metric</span>
-            <strong id="selectedMetric">Loading...</strong>
-          </article>
+            <article class="kpi-card orange">
+              <span>Selected Metric</span>
+              <strong id="selectedMetric">Loading...</strong>
+            </article>
+          </section>
+
+          <section class="map-card">
+            <div class="map-header">
+              <div>
+                <h2 id="mapTitle">European Choropleth Map</h2>
+                <p id="mapSubtitle">Generation by selected source and month.</p>
+              </div>
+
+              <div class="legend">
+                <span>low</span>
+                <div class="legend-gradient"></div>
+                <span>high</span>
+                <small id="legendMax"></small>
+              </div>
+            </div>
+
+            <div id="map"></div>
+
+          </section>
+
+          <section class="generation-insight-card" aria-label="Monthly generation pattern">
+            <div class="generation-insight-header">
+              <h3>Monthly Pattern</h3>
+              <p id="generationSeasonSubtitle">Average monthly behaviour for the selected source and countries.</p>
+            </div>
+
+            <div id="generationSeasonChart" class="generation-season-chart"></div>
+          </section>
         </section>
 
-        <section class="map-card">
-          <div class="map-header">
-            <div>
-              <h2 id="mapTitle">European Choropleth Map</h2>
-              <p id="mapSubtitle">Generation by selected source and month.</p>
+        <section
+          id="flowsView"
+          class="view-panel"
+          role="tabpanel"
+          aria-labelledby="flowsViewTab"
+          data-view-panel="flows"
+          hidden
+        >
+          <section class="flow-card">
+            <div class="flow-summary-grid">
+              <article class="flow-metric">
+                <span>Total Imports</span>
+                <strong id="totalImports">-</strong>
+              </article>
+
+              <article class="flow-metric">
+                <span>Total Exports</span>
+                <strong id="totalExports">-</strong>
+              </article>
+
+              <article class="flow-metric">
+                <span>Net Balance</span>
+                <strong id="netBalance">-</strong>
+              </article>
             </div>
 
-            <div class="legend">
-              <span>low</span>
-              <div class="legend-gradient"></div>
-              <span>high</span>
-              <small id="legendMax"></small>
-            </div>
-          </div>
+            <div class="flow-network-wrapper">
+              <div class="flow-network-header">
+                <h3>European Flow Network</h3>
+                <p id="flowNetworkSubtitle">
+                  All cross-border electricity connections for the selected time range.
+                </p>
+              </div>
 
-          <div id="map"></div>
-        </section>
-
-        <section class="flow-card">
-          <div class="flow-header">
-            <div>
-              <h2>Power Flow View</h2>
-              <p id="flowSubtitle">Select a country to inspect import and export relations.</p>
-            </div>
-          </div>
-
-          <div class="flow-summary-grid">
-            <article class="flow-metric">
-              <span>Total Imports</span>
-              <strong id="totalImports">-</strong>
-            </article>
-
-            <article class="flow-metric">
-              <span>Total Exports</span>
-              <strong id="totalExports">-</strong>
-            </article>
-
-            <article class="flow-metric">
-              <span>Net Balance</span>
-              <strong id="netBalance">-</strong>
-            </article>
-          </div>
-
-          <div class="flow-network-wrapper">
-            <div class="flow-network-header">
-              <h3>European Flow Network</h3>
-              <p id="flowNetworkSubtitle">
-                All cross-border electricity connections for the selected time range.
-              </p>
+              <div id="flowNetworkMap"></div>
             </div>
 
-            <div id="flowNetworkMap"></div>
-          </div>
+            <section class="partner-comparison-card" aria-label="Top importers and exporters">
+              <div class="partner-comparison-header">
+                <h3>Top Flow Ranking</h3>
+                <p>Imports and exports are shown within selected countries.</p>
+              </div>
 
-          <div class="flow-columns">
-            <article class="flow-list-card">
-              <h3>Top 3 Import Partners</h3>
-              <ol id="topImportList" class="flow-list"></ol>
-            </article>
+              <div class="partner-comparison-labels" aria-hidden="true">
+                <span>Imports</span>
+                <span>Rank</span>
+                <span>Exports</span>
+              </div>
 
-            <article class="flow-list-card">
-              <h3>Top 3 Export Partners</h3>
-              <ol id="topExportList" class="flow-list"></ol>
-            </article>
-          </div>
+              <div id="partnerComparison" class="partner-comparison"></div>
+            </section>
+          </section>
         </section>
 
       </section>
